@@ -61,6 +61,7 @@ param tags object = {
   Project: 'Azure-Migrate'
   ManagedBy: 'Bicep'
   Purpose: 'Migration-Demo'
+  SecurityControl: 'Ignore'
 }
 
 // =====================================================

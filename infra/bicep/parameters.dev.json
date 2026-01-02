@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "eastus"
+    },
+    "environmentPrefix": {
+      "value": "migrate"
+    },
+    "adminUsername": {
+      "value": "azureadmin"
+    },
+    "adminPassword": {
+      "value": "REPLACE_WITH_SECURE_PASSWORD"
+    },
+    "deployHyperVHost": {
+      "value": true
+    },
+    "deployBastion": {
+      "value": true
+    },
+    "hypervHostVmSize": {
+      "value": "Standard_D16s_v5"
+    },
+    "tags": {
+      "value": {
+        "Environment": "Demo",
+        "Project": "Azure-Migrate",
+        "ManagedBy": "Bicep",
+        "Purpose": "Migration-Demo",
+        "CostCenter": "IT-Demo",
+        "Owner": "Azure-Admin"
+      }
+    }
+  }
+}

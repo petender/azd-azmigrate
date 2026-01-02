@@ -1,0 +1,11 @@
+*Server name,IP addresses,*Cores,*Memory (In MB),*OS name,OS version,OS architecture,Server type,Hypervisor,CPU utilization percentage,Memory utilization percentage,Network adapters,Network In throughput,Network Out throughput,Boot type,Number of disks,Storage in use (In GB),Disk 1 size (In GB),Disk 1 read throughput (MB per second),Disk 1 write throughput (MB per second),Disk 1 read ops (operations per second),Disk 1 write ops (operations per second),Disk 2 size (In GB),Disk 2 read throughput (MB per second),Disk 2 write throughput (MB per second),Disk 2 read ops (operations per second),Disk 2 write ops (operations per second)
+SRV-WEB-01.contoso.local,10.0.10.101,4,16384,Microsoft Windows Server 2016 (64-bit),2016,x64,Virtual,Hyper-V,45,55,1,30,15,UEFI,1,450,500,150,120,180,250,,,,,
+SRV-WEB-02.contoso.local,10.0.10.102,4,16384,Microsoft Windows Server 2016 (64-bit),2016,x64,Virtual,Hyper-V,40,50,1,35,18,UEFI,1,450,500,150,120,180,250,,,,,
+SRV-APP-01.contoso.local,10.0.10.111,8,32768,Microsoft Windows Server 2019 (64-bit),2019,x64,Virtual,Hyper-V,60,65,2,45,25,UEFI,2,900,1000,200,180,220,280,500,150,100,180,220
+SRV-APP-02.contoso.local,10.0.10.112,8,32768,Microsoft Windows Server 2019 (64-bit),2019,x64,Virtual,Hyper-V,55,60,2,40,22,UEFI,2,900,1000,200,180,220,280,500,150,100,180,220
+SRV-DB-01.contoso.local,10.0.10.121,16,65536,Microsoft Windows Server 2019 (64-bit),2019,x64,Virtual,Hyper-V,70,75,2,60,35,UEFI,2,1800,2000,300,280,350,400,1000,250,200,300,350
+SRV-DB-02.contoso.local,10.0.10.122,16,65536,Microsoft Windows Server 2019 (64-bit),2019,x64,Virtual,Hyper-V,68,72,2,58,33,UEFI,2,1800,2000,300,280,350,400,1000,250,200,300,350
+SRV-LINUX-01.contoso.local,10.0.10.131,4,8192,Ubuntu 20.04 LTS,20.04,x64,Virtual,Hyper-V,35,40,1,25,12,BIOS,1,200,250,100,80,120,150,,,,,
+SRV-LINUX-02.contoso.local,10.0.10.132,8,16384,Red Hat Enterprise Linux 8,8.0,x64,Virtual,Hyper-V,50,55,2,35,18,BIOS,1,450,500,150,120,180,220,,,,,
+SRV-FILE-01.contoso.local,10.0.10.141,4,16384,Microsoft Windows Server 2016 (64-bit),2016,x64,Virtual,Hyper-V,30,35,1,20,10,UEFI,1,4500,5000,120,100,140,180,,,,,
+SRV-DC-01.contoso.local,10.0.10.151,4,16384,Microsoft Windows Server 2019 (64-bit),2019,x64,Virtual,Hyper-V,25,30,1,15,8,UEFI,1,200,250,80,60,100,130,,,,

@@ -1,0 +1,1815 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.39.26.7824",
+      "templateHash": "3666270457685102649"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "centralus",
+      "allowedValues": [
+        "centralus",
+        "westeurope",
+        "westus2",
+        "northeurope",
+        "eastasia",
+        "southeastasia",
+        "uksouth",
+        "canadacentral",
+        "australiaeast"
+      ],
+      "metadata": {
+        "description": "Primary Azure region for deployment"
+      }
+    },
+    "environmentPrefix": {
+      "type": "string",
+      "defaultValue": "migrate",
+      "minLength": 3,
+      "maxLength": 10,
+      "metadata": {
+        "description": "Environment prefix for resource naming"
+      }
+    },
+    "adminUsername": {
+      "type": "string",
+      "defaultValue": "azureadmin",
+      "metadata": {
+        "description": "Administrator username for VMs"
+      }
+    },
+    "adminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Administrator password for VMs"
+      }
+    },
+    "deployHyperVHost": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Deploy Hyper-V host VM for on-premises simulation"
+      }
+    },
+    "deployBastion": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Deploy Azure Bastion for secure VM access"
+      }
+    },
+    "hypervHostVmSize": {
+      "type": "string",
+      "defaultValue": "Standard_D16s_v5",
+      "allowedValues": [
+        "Standard_D16s_v5",
+        "Standard_D16s_v4",
+        "Standard_E16s_v5",
+        "Standard_D8s_v5"
+      ],
+      "metadata": {
+        "description": "Hyper-V host VM size (must support nested virtualization)"
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {
+        "Environment": "Demo",
+        "Project": "Azure-Migrate",
+        "ManagedBy": "Bicep",
+        "Purpose": "Migration-Demo"
+      },
+      "metadata": {
+        "description": "Tags to apply to all resources"
+      }
+    }
+  },
+  "variables": {
+    "resourceGroupNames": {
+      "hub": "[format('rg-{0}-hub', parameters('environmentPrefix'))]",
+      "network": "[format('rg-{0}-network', parameters('environmentPrefix'))]",
+      "target": "[format('rg-{0}-target', parameters('environmentPrefix'))]",
+      "monitor": "[format('rg-{0}-monitor', parameters('environmentPrefix'))]",
+      "onprem": "[format('rg-{0}-onprem', parameters('environmentPrefix'))]"
+    },
+    "namingPrefix": "[format('{0}-{1}', parameters('environmentPrefix'), uniqueString(subscription().subscriptionId, parameters('location')))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('resourceGroupNames').hub]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]"
+    },
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('resourceGroupNames').network]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]"
+    },
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('resourceGroupNames').target]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]"
+    },
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('resourceGroupNames').monitor]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]"
+    },
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('resourceGroupNames').onprem]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]"
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('deploy-monitoring-{0}', deployment().name)]",
+      "resourceGroup": "[variables('resourceGroupNames').monitor]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namingPrefix": {
+            "value": "[variables('namingPrefix')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "10263341793086063070"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for resources"
+              }
+            },
+            "namingPrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Naming prefix for resources"
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Resource tags"
+              }
+            }
+          },
+          "variables": {
+            "logAnalyticsWorkspaceName": "[format('law-{0}', parameters('namingPrefix'))]",
+            "diagnosticsStorageName": "[format('std{0}', replace(parameters('namingPrefix'), '-', ''))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.OperationalInsights/workspaces",
+              "apiVersion": "2023-09-01",
+              "name": "[variables('logAnalyticsWorkspaceName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "sku": {
+                  "name": "PerGB2018"
+                },
+                "retentionInDays": 30,
+                "features": {
+                  "enableLogAccessUsingOnlyResourcePermissions": true
+                },
+                "publicNetworkAccessForIngestion": "Enabled",
+                "publicNetworkAccessForQuery": "Enabled"
+              }
+            },
+            {
+              "type": "Microsoft.OperationsManagement/solutions",
+              "apiVersion": "2015-11-01-preview",
+              "name": "[format('VMInsights({0})', variables('logAnalyticsWorkspaceName'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "plan": {
+                "name": "[format('VMInsights({0})', variables('logAnalyticsWorkspaceName'))]",
+                "publisher": "Microsoft",
+                "product": "OMSGallery/VMInsights",
+                "promotionCode": ""
+              },
+              "properties": {
+                "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.OperationsManagement/solutions",
+              "apiVersion": "2015-11-01-preview",
+              "name": "[format('ChangeTracking({0})', variables('logAnalyticsWorkspaceName'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "plan": {
+                "name": "[format('ChangeTracking({0})', variables('logAnalyticsWorkspaceName'))]",
+                "publisher": "Microsoft",
+                "product": "OMSGallery/ChangeTracking",
+                "promotionCode": ""
+              },
+              "properties": {
+                "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.OperationsManagement/solutions",
+              "apiVersion": "2015-11-01-preview",
+              "name": "[format('Security({0})', variables('logAnalyticsWorkspaceName'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "plan": {
+                "name": "[format('Security({0})', variables('logAnalyticsWorkspaceName'))]",
+                "publisher": "Microsoft",
+                "product": "OMSGallery/Security",
+                "promotionCode": ""
+              },
+              "properties": {
+                "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-01-01",
+              "name": "[take(variables('diagnosticsStorageName'), 24)]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Standard_LRS"
+              },
+              "kind": "StorageV2",
+              "properties": {
+                "accessTier": "Cool",
+                "allowBlobPublicAccess": false,
+                "minimumTlsVersion": "TLS1_2",
+                "supportsHttpsTrafficOnly": true,
+                "encryption": {
+                  "services": {
+                    "blob": {
+                      "enabled": true
+                    },
+                    "file": {
+                      "enabled": true
+                    }
+                  },
+                  "keySource": "Microsoft.Storage"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Insights/dataCollectionRules",
+              "apiVersion": "2022-06-01",
+              "name": "[format('dcr-{0}-vminsights', parameters('namingPrefix'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "Windows",
+              "properties": {
+                "dataSources": {
+                  "performanceCounters": [
+                    {
+                      "name": "VMInsightsPerfCounters",
+                      "streams": [
+                        "Microsoft-InsightsMetrics"
+                      ],
+                      "samplingFrequencyInSeconds": 60,
+                      "counterSpecifiers": [
+                        "\\VmInsights\\DetailedMetrics"
+                      ]
+                    }
+                  ],
+                  "extensions": [
+                    {
+                      "name": "DependencyAgentDataSource",
+                      "streams": [
+                        "Microsoft-ServiceMap"
+                      ],
+                      "extensionName": "DependencyAgent"
+                    }
+                  ]
+                },
+                "destinations": {
+                  "logAnalytics": [
+                    {
+                      "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]",
+                      "name": "VMInsightsPerf-Logs-Dest"
+                    }
+                  ]
+                },
+                "dataFlows": [
+                  {
+                    "streams": [
+                      "Microsoft-InsightsMetrics"
+                    ],
+                    "destinations": [
+                      "VMInsightsPerf-Logs-Dest"
+                    ]
+                  },
+                  {
+                    "streams": [
+                      "Microsoft-ServiceMap"
+                    ],
+                    "destinations": [
+                      "VMInsightsPerf-Logs-Dest"
+                    ]
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Insights/actionGroups",
+              "apiVersion": "2023-01-01",
+              "name": "[format('ag-{0}-alerts', parameters('namingPrefix'))]",
+              "location": "global",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "groupShortName": "MigrateDemo",
+                "enabled": true,
+                "emailReceivers": [],
+                "smsReceivers": [],
+                "webhookReceivers": [],
+                "azureAppPushReceivers": [],
+                "itsmReceivers": [],
+                "automationRunbookReceivers": []
+              }
+            }
+          ],
+          "outputs": {
+            "logAnalyticsWorkspaceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Log Analytics Workspace ID"
+              },
+              "value": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]"
+            },
+            "logAnalyticsWorkspaceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Log Analytics Workspace name"
+              },
+              "value": "[variables('logAnalyticsWorkspaceName')]"
+            },
+            "logAnalyticsCustomerId": {
+              "type": "string",
+              "metadata": {
+                "description": "Log Analytics Workspace customer ID"
+              },
+              "value": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName')), '2023-09-01').customerId]"
+            },
+            "diagnosticsStorageAccountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Diagnostics storage account name"
+              },
+              "value": "[take(variables('diagnosticsStorageName'), 24)]"
+            },
+            "diagnosticsStorageAccountId": {
+              "type": "string",
+              "metadata": {
+                "description": "Diagnostics storage account ID"
+              },
+              "value": "[resourceId('Microsoft.Storage/storageAccounts', take(variables('diagnosticsStorageName'), 24))]"
+            },
+            "dataCollectionRuleId": {
+              "type": "string",
+              "metadata": {
+                "description": "Data Collection Rule ID"
+              },
+              "value": "[resourceId('Microsoft.Insights/dataCollectionRules', format('dcr-{0}-vminsights', parameters('namingPrefix')))]"
+            },
+            "actionGroupId": {
+              "type": "string",
+              "metadata": {
+                "description": "Action Group ID"
+              },
+              "value": "[resourceId('Microsoft.Insights/actionGroups', format('ag-{0}-alerts', parameters('namingPrefix')))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupNames').monitor)]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('deploy-networking-{0}', deployment().name)]",
+      "resourceGroup": "[variables('resourceGroupNames').network]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namingPrefix": {
+            "value": "[variables('namingPrefix')]"
+          },
+          "deployBastion": {
+            "value": "[parameters('deployBastion')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "15351600799764654567"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for resources"
+              }
+            },
+            "namingPrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Naming prefix for resources"
+              }
+            },
+            "deployBastion": {
+              "type": "bool",
+              "defaultValue": true,
+              "metadata": {
+                "description": "Deploy Azure Bastion"
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Resource tags"
+              }
+            }
+          },
+          "variables": {
+            "vnetName": "[format('vnet-{0}-hub', parameters('namingPrefix'))]",
+            "bastionName": "[format('bastion-{0}', parameters('namingPrefix'))]",
+            "bastionPublicIpName": "[format('pip-{0}', variables('bastionName'))]",
+            "subnets": {
+              "migrate": {
+                "name": "subnet-migrate-appliance",
+                "addressPrefix": "10.0.1.0/24"
+              },
+              "target": {
+                "name": "subnet-target-vms",
+                "addressPrefix": "10.0.2.0/24"
+              },
+              "bastion": {
+                "name": "AzureBastionSubnet",
+                "addressPrefix": "10.0.3.0/26"
+              },
+              "onprem": {
+                "name": "subnet-onprem-hyperv",
+                "addressPrefix": "10.0.10.0/24"
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2023-09-01",
+              "name": "[format('nsg-{0}', variables('subnets').migrate.name)]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "securityRules": [
+                  {
+                    "name": "Allow-HTTPS-Inbound",
+                    "properties": {
+                      "priority": 100,
+                      "direction": "Inbound",
+                      "access": "Allow",
+                      "protocol": "Tcp",
+                      "sourcePortRange": "*",
+                      "destinationPortRange": "443",
+                      "sourceAddressPrefix": "VirtualNetwork",
+                      "destinationAddressPrefix": "*"
+                    }
+                  },
+                  {
+                    "name": "Allow-Azure-Services",
+                    "properties": {
+                      "priority": 110,
+                      "direction": "Outbound",
+                      "access": "Allow",
+                      "protocol": "*",
+                      "sourcePortRange": "*",
+                      "destinationPortRange": "*",
+                      "sourceAddressPrefix": "*",
+                      "destinationAddressPrefix": "AzureCloud"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2023-09-01",
+              "name": "[format('nsg-{0}', variables('subnets').target.name)]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "securityRules": [
+                  {
+                    "name": "Allow-RDP-From-Bastion",
+                    "properties": {
+                      "priority": 100,
+                      "direction": "Inbound",
+                      "access": "Allow",
+                      "protocol": "Tcp",
+                      "sourcePortRange": "*",
+                      "destinationPortRange": "3389",
+                      "sourceAddressPrefix": "[variables('subnets').bastion.addressPrefix]",
+                      "destinationAddressPrefix": "*"
+                    }
+                  },
+                  {
+                    "name": "Allow-SSH-From-Bastion",
+                    "properties": {
+                      "priority": 110,
+                      "direction": "Inbound",
+                      "access": "Allow",
+                      "protocol": "Tcp",
+                      "sourcePortRange": "*",
+                      "destinationPortRange": "22",
+                      "sourceAddressPrefix": "[variables('subnets').bastion.addressPrefix]",
+                      "destinationAddressPrefix": "*"
+                    }
+                  },
+                  {
+                    "name": "Allow-HTTP-Internal",
+                    "properties": {
+                      "priority": 120,
+                      "direction": "Inbound",
+                      "access": "Allow",
+                      "protocol": "Tcp",
+                      "sourcePortRange": "*",
+                      "destinationPortRange": "80",
+                      "sourceAddressPrefix": "VirtualNetwork",
+                      "destinationAddressPrefix": "*"
+                    }
+                  },
+                  {
+                    "name": "Allow-HTTPS-Internal",
+                    "properties": {
+                      "priority": 130,
+                      "direction": "Inbound",
+                      "access": "Allow",
+                      "protocol": "Tcp",
+                      "sourcePortRange": "*",
+                      "destinationPortRange": "443",
+                      "sourceAddressPrefix": "VirtualNetwork",
+                      "destinationAddressPrefix": "*"
+                    }
+                  },
+                  {
+                    "name": "Allow-SQL-Internal",
+                    "properties": {
+                      "priority": 140,
+                      "direction": "Inbound",
+                      "access": "Allow",
+                      "protocol": "Tcp",
+                      "sourcePortRange": "*",
+                      "destinationPortRange": "1433",
+                      "sourceAddressPrefix": "VirtualNetwork",
+                      "destinationAddressPrefix": "*"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2023-09-01",
+              "name": "[format('nsg-{0}', variables('subnets').onprem.name)]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "securityRules": [
+                  {
+                    "name": "Allow-RDP-From-Bastion",
+                    "properties": {
+                      "priority": 100,
+                      "direction": "Inbound",
+                      "access": "Allow",
+                      "protocol": "Tcp",
+                      "sourcePortRange": "*",
+                      "destinationPortRange": "3389",
+                      "sourceAddressPrefix": "[variables('subnets').bastion.addressPrefix]",
+                      "destinationAddressPrefix": "*"
+                    }
+                  },
+                  {
+                    "name": "Allow-Hyper-V-Management",
+                    "properties": {
+                      "priority": 110,
+                      "direction": "Inbound",
+                      "access": "Allow",
+                      "protocol": "Tcp",
+                      "sourcePortRange": "*",
+                      "destinationPortRanges": [
+                        "5985",
+                        "5986"
+                      ],
+                      "sourceAddressPrefix": "VirtualNetwork",
+                      "destinationAddressPrefix": "*"
+                    }
+                  },
+                  {
+                    "name": "Allow-Azure-Migrate-Communication",
+                    "properties": {
+                      "priority": 120,
+                      "direction": "Outbound",
+                      "access": "Allow",
+                      "protocol": "*",
+                      "sourcePortRange": "*",
+                      "destinationPortRange": "*",
+                      "sourceAddressPrefix": "*",
+                      "destinationAddressPrefix": "AzureCloud"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Network/virtualNetworks",
+              "apiVersion": "2023-09-01",
+              "name": "[variables('vnetName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "addressSpace": {
+                  "addressPrefixes": [
+                    "10.0.0.0/16"
+                  ]
+                },
+                "subnets": [
+                  {
+                    "name": "[variables('subnets').migrate.name]",
+                    "properties": {
+                      "addressPrefix": "[variables('subnets').migrate.addressPrefix]",
+                      "networkSecurityGroup": {
+                        "id": "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-{0}', variables('subnets').migrate.name))]"
+                      }
+                    }
+                  },
+                  {
+                    "name": "[variables('subnets').target.name]",
+                    "properties": {
+                      "addressPrefix": "[variables('subnets').target.addressPrefix]",
+                      "networkSecurityGroup": {
+                        "id": "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-{0}', variables('subnets').target.name))]"
+                      }
+                    }
+                  },
+                  {
+                    "name": "[variables('subnets').onprem.name]",
+                    "properties": {
+                      "addressPrefix": "[variables('subnets').onprem.addressPrefix]",
+                      "networkSecurityGroup": {
+                        "id": "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-{0}', variables('subnets').onprem.name))]"
+                      }
+                    }
+                  },
+                  {
+                    "name": "[variables('subnets').bastion.name]",
+                    "properties": {
+                      "addressPrefix": "[variables('subnets').bastion.addressPrefix]"
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-{0}', variables('subnets').migrate.name))]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-{0}', variables('subnets').onprem.name))]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-{0}', variables('subnets').target.name))]"
+              ]
+            },
+            {
+              "condition": "[parameters('deployBastion')]",
+              "type": "Microsoft.Network/publicIPAddresses",
+              "apiVersion": "2023-09-01",
+              "name": "[variables('bastionPublicIpName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Standard"
+              },
+              "properties": {
+                "publicIPAllocationMethod": "Static",
+                "publicIPAddressVersion": "IPv4"
+              }
+            },
+            {
+              "condition": "[parameters('deployBastion')]",
+              "type": "Microsoft.Network/bastionHosts",
+              "apiVersion": "2023-09-01",
+              "name": "[variables('bastionName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Basic"
+              },
+              "properties": {
+                "ipConfigurations": [
+                  {
+                    "name": "ipconfig1",
+                    "properties": {
+                      "subnet": {
+                        "id": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('vnetName')), variables('subnets').bastion.name)]"
+                      },
+                      "publicIPAddress": {
+                        "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPublicIpName'))]"
+                      }
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPublicIpName'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "hubVnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "Hub VNet resource ID"
+              },
+              "value": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+            },
+            "hubVnetName": {
+              "type": "string",
+              "metadata": {
+                "description": "Hub VNet name"
+              },
+              "value": "[variables('vnetName')]"
+            },
+            "migrateSubnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "Migrate appliance subnet ID"
+              },
+              "value": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('vnetName')), variables('subnets').migrate.name)]"
+            },
+            "targetSubnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "Target VMs subnet ID"
+              },
+              "value": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('vnetName')), variables('subnets').target.name)]"
+            },
+            "onpremSubnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "On-premises Hyper-V subnet ID"
+              },
+              "value": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('vnetName')), variables('subnets').onprem.name)]"
+            },
+            "bastionHostName": {
+              "type": "string",
+              "metadata": {
+                "description": "Bastion host name"
+              },
+              "value": "[if(parameters('deployBastion'), variables('bastionName'), '')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupNames').network)]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('deploy-migrate-hub-{0}', deployment().name)]",
+      "resourceGroup": "[variables('resourceGroupNames').hub]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namingPrefix": {
+            "value": "[variables('namingPrefix')]"
+          },
+          "logAnalyticsWorkspaceId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').monitor), 'Microsoft.Resources/deployments', format('deploy-monitoring-{0}', deployment().name)), '2025-04-01').outputs.logAnalyticsWorkspaceId.value]"
+          },
+          "enableDiagnostics": {
+            "value": false
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "15221773317521105202"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for resources"
+              }
+            },
+            "namingPrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Naming prefix for resources"
+              }
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Log Analytics Workspace ID for diagnostics"
+              }
+            },
+            "enableDiagnostics": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Enable diagnostic settings (requires workspace to be fully provisioned)"
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Resource tags"
+              }
+            }
+          },
+          "variables": {
+            "migrateProjectName": "[format('migrate-project-{0}', parameters('namingPrefix'))]",
+            "recoveryVaultName": "[format('rsv-{0}', parameters('namingPrefix'))]",
+            "keyVaultName": "[format('kv-{0}', take(parameters('namingPrefix'), 21))]",
+            "storageAccountName": "[format('stm{0}', replace(parameters('namingPrefix'), '-', ''))]",
+            "cacheStorageName": "[format('stc{0}', replace(parameters('namingPrefix'), '-', ''))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-01-01",
+              "name": "[take(variables('storageAccountName'), 24)]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Standard_LRS"
+              },
+              "kind": "StorageV2",
+              "properties": {
+                "accessTier": "Hot",
+                "allowBlobPublicAccess": false,
+                "minimumTlsVersion": "TLS1_2",
+                "supportsHttpsTrafficOnly": true,
+                "encryption": {
+                  "services": {
+                    "blob": {
+                      "enabled": true
+                    },
+                    "file": {
+                      "enabled": true
+                    }
+                  },
+                  "keySource": "Microsoft.Storage"
+                },
+                "networkAcls": {
+                  "defaultAction": "Allow",
+                  "bypass": "AzureServices"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+              "apiVersion": "2023-01-01",
+              "name": "[format('{0}/default/migrate-appliance', take(variables('storageAccountName'), 24))]",
+              "properties": {
+                "publicAccess": "None"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', take(variables('storageAccountName'), 24))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-01-01",
+              "name": "[take(variables('cacheStorageName'), 24)]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Standard_LRS"
+              },
+              "kind": "StorageV2",
+              "properties": {
+                "accessTier": "Hot",
+                "allowBlobPublicAccess": false,
+                "minimumTlsVersion": "TLS1_2",
+                "supportsHttpsTrafficOnly": true,
+                "encryption": {
+                  "services": {
+                    "blob": {
+                      "enabled": true
+                    }
+                  },
+                  "keySource": "Microsoft.Storage"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults",
+              "apiVersion": "2023-07-01",
+              "name": "[variables('keyVaultName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "sku": {
+                  "family": "A",
+                  "name": "standard"
+                },
+                "tenantId": "[subscription().tenantId]",
+                "enabledForDeployment": true,
+                "enabledForDiskEncryption": true,
+                "enabledForTemplateDeployment": true,
+                "enableRbacAuthorization": true,
+                "enableSoftDelete": true,
+                "softDeleteRetentionInDays": 7,
+                "publicNetworkAccess": "Enabled",
+                "networkAcls": {
+                  "defaultAction": "Allow",
+                  "bypass": "AzureServices"
+                }
+              }
+            },
+            {
+              "condition": "[and(parameters('enableDiagnostics'), not(empty(parameters('logAnalyticsWorkspaceId'))))]",
+              "type": "Microsoft.Insights/diagnosticSettings",
+              "apiVersion": "2021-05-01-preview",
+              "scope": "[format('Microsoft.KeyVault/vaults/{0}', variables('keyVaultName'))]",
+              "name": "diagnostics",
+              "properties": {
+                "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
+                "logs": [
+                  {
+                    "category": "AuditEvent",
+                    "enabled": true
+                  }
+                ],
+                "metrics": [
+                  {
+                    "category": "AllMetrics",
+                    "enabled": true
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.RecoveryServices/vaults",
+              "apiVersion": "2023-08-01",
+              "name": "[variables('recoveryVaultName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Standard"
+              },
+              "properties": {
+                "publicNetworkAccess": "Enabled"
+              }
+            },
+            {
+              "type": "Microsoft.RecoveryServices/vaults/backupconfig",
+              "apiVersion": "2023-08-01",
+              "name": "[format('{0}/{1}', variables('recoveryVaultName'), 'vaultconfig')]",
+              "properties": {
+                "storageType": "LocallyRedundant",
+                "storageTypeState": "Unlocked"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.RecoveryServices/vaults', variables('recoveryVaultName'))]"
+              ]
+            },
+            {
+              "condition": "[and(parameters('enableDiagnostics'), not(empty(parameters('logAnalyticsWorkspaceId'))))]",
+              "type": "Microsoft.Insights/diagnosticSettings",
+              "apiVersion": "2021-05-01-preview",
+              "scope": "[format('Microsoft.RecoveryServices/vaults/{0}', variables('recoveryVaultName'))]",
+              "name": "diagnostics",
+              "properties": {
+                "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
+                "logs": [
+                  {
+                    "category": "AzureBackupReport",
+                    "enabled": true
+                  },
+                  {
+                    "category": "AzureSiteRecoveryJobs",
+                    "enabled": true
+                  },
+                  {
+                    "category": "AzureSiteRecoveryEvents",
+                    "enabled": true
+                  },
+                  {
+                    "category": "AzureSiteRecoveryReplicatedItems",
+                    "enabled": true
+                  }
+                ],
+                "metrics": [
+                  {
+                    "category": "Health",
+                    "enabled": true
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.RecoveryServices/vaults', variables('recoveryVaultName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Migrate/migrateProjects",
+              "apiVersion": "2020-06-01-preview",
+              "name": "[variables('migrateProjectName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "publicNetworkAccess": "Enabled"
+              }
+            }
+          ],
+          "outputs": {
+            "migrateProjectName": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure Migrate project name"
+              },
+              "value": "[variables('migrateProjectName')]"
+            },
+            "migrateProjectId": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure Migrate project ID"
+              },
+              "value": "[resourceId('Microsoft.Migrate/migrateProjects', variables('migrateProjectName'))]"
+            },
+            "recoveryServicesVaultName": {
+              "type": "string",
+              "metadata": {
+                "description": "Recovery Services Vault name"
+              },
+              "value": "[variables('recoveryVaultName')]"
+            },
+            "recoveryServicesVaultId": {
+              "type": "string",
+              "metadata": {
+                "description": "Recovery Services Vault ID"
+              },
+              "value": "[resourceId('Microsoft.RecoveryServices/vaults', variables('recoveryVaultName'))]"
+            },
+            "keyVaultName": {
+              "type": "string",
+              "metadata": {
+                "description": "Key Vault name"
+              },
+              "value": "[variables('keyVaultName')]"
+            },
+            "keyVaultId": {
+              "type": "string",
+              "metadata": {
+                "description": "Key Vault ID"
+              },
+              "value": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+            },
+            "keyVaultUri": {
+              "type": "string",
+              "metadata": {
+                "description": "Key Vault URI"
+              },
+              "value": "[reference(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), '2023-07-01').vaultUri]"
+            },
+            "storageAccountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Storage account name"
+              },
+              "value": "[take(variables('storageAccountName'), 24)]"
+            },
+            "storageAccountId": {
+              "type": "string",
+              "metadata": {
+                "description": "Storage account ID"
+              },
+              "value": "[resourceId('Microsoft.Storage/storageAccounts', take(variables('storageAccountName'), 24))]"
+            },
+            "cacheStorageAccountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Cache storage account name"
+              },
+              "value": "[take(variables('cacheStorageName'), 24)]"
+            },
+            "cacheStorageAccountId": {
+              "type": "string",
+              "metadata": {
+                "description": "Cache storage account ID"
+              },
+              "value": "[resourceId('Microsoft.Storage/storageAccounts', take(variables('cacheStorageName'), 24))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').monitor), 'Microsoft.Resources/deployments', format('deploy-monitoring-{0}', deployment().name))]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupNames').hub)]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('deploy-landing-zone-{0}', deployment().name)]",
+      "resourceGroup": "[variables('resourceGroupNames').target]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namingPrefix": {
+            "value": "[variables('namingPrefix')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "7680869423460970951"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for resources"
+              }
+            },
+            "namingPrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Naming prefix for resources"
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Resource tags"
+              }
+            }
+          },
+          "variables": {
+            "availabilitySets": [
+              {
+                "name": "[format('avset-{0}-web', parameters('namingPrefix'))]",
+                "faultDomains": 2,
+                "updateDomains": 5
+              },
+              {
+                "name": "[format('avset-{0}-app', parameters('namingPrefix'))]",
+                "faultDomains": 2,
+                "updateDomains": 5
+              },
+              {
+                "name": "[format('avset-{0}-data', parameters('namingPrefix'))]",
+                "faultDomains": 2,
+                "updateDomains": 5
+              },
+              {
+                "name": "[format('avset-{0}-infra', parameters('namingPrefix'))]",
+                "faultDomains": 2,
+                "updateDomains": 3
+              }
+            ]
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Compute/proximityPlacementGroups",
+              "apiVersion": "2023-09-01",
+              "name": "[format('ppg-{0}-migrate', parameters('namingPrefix'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "proximityPlacementGroupType": "Standard"
+              }
+            },
+            {
+              "copy": {
+                "name": "availabilitySet",
+                "count": "[length(variables('availabilitySets'))]"
+              },
+              "type": "Microsoft.Compute/availabilitySets",
+              "apiVersion": "2023-09-01",
+              "name": "[variables('availabilitySets')[copyIndex()].name]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Aligned"
+              },
+              "properties": {
+                "platformFaultDomainCount": "[variables('availabilitySets')[copyIndex()].faultDomains]",
+                "platformUpdateDomainCount": "[variables('availabilitySets')[copyIndex()].updateDomains]",
+                "proximityPlacementGroup": {
+                  "id": "[resourceId('Microsoft.Compute/proximityPlacementGroups', format('ppg-{0}-migrate', parameters('namingPrefix')))]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Compute/proximityPlacementGroups', format('ppg-{0}-migrate', parameters('namingPrefix')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "webAvailabilitySetId": {
+              "type": "string",
+              "metadata": {
+                "description": "Web tier availability set ID"
+              },
+              "value": "[resourceId('Microsoft.Compute/availabilitySets', variables('availabilitySets')[0].name)]"
+            },
+            "webAvailabilitySetName": {
+              "type": "string",
+              "metadata": {
+                "description": "Web tier availability set name"
+              },
+              "value": "[variables('availabilitySets')[0].name]"
+            },
+            "appAvailabilitySetId": {
+              "type": "string",
+              "metadata": {
+                "description": "App tier availability set ID"
+              },
+              "value": "[resourceId('Microsoft.Compute/availabilitySets', variables('availabilitySets')[1].name)]"
+            },
+            "appAvailabilitySetName": {
+              "type": "string",
+              "metadata": {
+                "description": "App tier availability set name"
+              },
+              "value": "[variables('availabilitySets')[1].name]"
+            },
+            "dataAvailabilitySetId": {
+              "type": "string",
+              "metadata": {
+                "description": "Data tier availability set ID"
+              },
+              "value": "[resourceId('Microsoft.Compute/availabilitySets', variables('availabilitySets')[2].name)]"
+            },
+            "dataAvailabilitySetName": {
+              "type": "string",
+              "metadata": {
+                "description": "Data tier availability set name"
+              },
+              "value": "[variables('availabilitySets')[2].name]"
+            },
+            "infraAvailabilitySetId": {
+              "type": "string",
+              "metadata": {
+                "description": "Infrastructure tier availability set ID"
+              },
+              "value": "[resourceId('Microsoft.Compute/availabilitySets', variables('availabilitySets')[3].name)]"
+            },
+            "infraAvailabilitySetName": {
+              "type": "string",
+              "metadata": {
+                "description": "Infrastructure tier availability set name"
+              },
+              "value": "[variables('availabilitySets')[3].name]"
+            },
+            "proximityPlacementGroupId": {
+              "type": "string",
+              "metadata": {
+                "description": "Proximity Placement Group ID"
+              },
+              "value": "[resourceId('Microsoft.Compute/proximityPlacementGroups', format('ppg-{0}-migrate', parameters('namingPrefix')))]"
+            },
+            "availabilitySetIds": {
+              "type": "array",
+              "metadata": {
+                "description": "All availability set IDs"
+              },
+              "copy": {
+                "count": "[length(variables('availabilitySets'))]",
+                "input": {
+                  "name": "[variables('availabilitySets')[copyIndex()].name]",
+                  "id": "[resourceId('Microsoft.Compute/availabilitySets', variables('availabilitySets')[copyIndex()].name)]"
+                }
+              }
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupNames').target)]"
+      ]
+    },
+    {
+      "condition": "[parameters('deployHyperVHost')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('deploy-hyperv-host-{0}', deployment().name)]",
+      "resourceGroup": "[variables('resourceGroupNames').onprem]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namingPrefix": {
+            "value": "[variables('namingPrefix')]"
+          },
+          "adminUsername": {
+            "value": "[parameters('adminUsername')]"
+          },
+          "adminPassword": {
+            "value": "[parameters('adminPassword')]"
+          },
+          "vmSize": {
+            "value": "[parameters('hypervHostVmSize')]"
+          },
+          "subnetId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').network), 'Microsoft.Resources/deployments', format('deploy-networking-{0}', deployment().name)), '2025-04-01').outputs.onpremSubnetId.value]"
+          },
+          "logAnalyticsWorkspaceId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').monitor), 'Microsoft.Resources/deployments', format('deploy-monitoring-{0}', deployment().name)), '2025-04-01').outputs.logAnalyticsWorkspaceId.value]"
+          },
+          "dataCollectionRuleId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').monitor), 'Microsoft.Resources/deployments', format('deploy-monitoring-{0}', deployment().name)), '2025-04-01').outputs.dataCollectionRuleId.value]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "4142848195512808605"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for resources"
+              }
+            },
+            "namingPrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Naming prefix for resources"
+              }
+            },
+            "adminUsername": {
+              "type": "string",
+              "metadata": {
+                "description": "Administrator username"
+              }
+            },
+            "adminPassword": {
+              "type": "securestring",
+              "metadata": {
+                "description": "Administrator password"
+              }
+            },
+            "vmSize": {
+              "type": "string",
+              "defaultValue": "Standard_D16s_v5",
+              "metadata": {
+                "description": "VM size (must support nested virtualization)"
+              }
+            },
+            "subnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "Subnet ID for the Hyper-V host"
+              }
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Log Analytics Workspace ID for VM insights"
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Resource tags"
+              }
+            },
+            "dataCollectionRuleId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Data Collection Rule ID for VM Insights (optional)"
+              }
+            }
+          },
+          "variables": {
+            "vmName": "[format('vm-{0}-hyperv', parameters('namingPrefix'))]",
+            "nicName": "[format('nic-{0}', variables('vmName'))]",
+            "osDiskName": "[format('disk-{0}-os', variables('vmName'))]",
+            "dataDiskName": "[format('disk-{0}-data', variables('vmName'))]",
+            "publicIpName": "[format('pip-{0}', variables('vmName'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/publicIPAddresses",
+              "apiVersion": "2023-09-01",
+              "name": "[variables('publicIpName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Standard"
+              },
+              "properties": {
+                "publicIPAllocationMethod": "Static",
+                "publicIPAddressVersion": "IPv4",
+                "dnsSettings": {
+                  "domainNameLabel": "[toLower(format('{0}-{1}', variables('vmName'), uniqueString(resourceGroup().id)))]"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Network/networkInterfaces",
+              "apiVersion": "2023-09-01",
+              "name": "[variables('nicName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "ipConfigurations": [
+                  {
+                    "name": "ipconfig1",
+                    "properties": {
+                      "subnet": {
+                        "id": "[parameters('subnetId')]"
+                      },
+                      "privateIPAllocationMethod": "Dynamic",
+                      "publicIPAddress": {
+                        "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIpName'))]"
+                      }
+                    }
+                  }
+                ],
+                "enableAcceleratedNetworking": true
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIpName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Compute/virtualMachines",
+              "apiVersion": "2023-09-01",
+              "name": "[variables('vmName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "hardwareProfile": {
+                  "vmSize": "[parameters('vmSize')]"
+                },
+                "osProfile": {
+                  "computerName": "[take(variables('vmName'), 15)]",
+                  "adminUsername": "[parameters('adminUsername')]",
+                  "adminPassword": "[parameters('adminPassword')]",
+                  "windowsConfiguration": {
+                    "enableAutomaticUpdates": true,
+                    "patchSettings": {
+                      "patchMode": "AutomaticByPlatform",
+                      "automaticByPlatformSettings": {
+                        "rebootSetting": "IfRequired"
+                      }
+                    },
+                    "timeZone": "UTC"
+                  }
+                },
+                "storageProfile": {
+                  "imageReference": {
+                    "publisher": "MicrosoftWindowsServer",
+                    "offer": "WindowsServer",
+                    "sku": "2022-datacenter-azure-edition",
+                    "version": "latest"
+                  },
+                  "osDisk": {
+                    "name": "[variables('osDiskName')]",
+                    "createOption": "FromImage",
+                    "caching": "ReadWrite",
+                    "managedDisk": {
+                      "storageAccountType": "Premium_LRS"
+                    },
+                    "diskSizeGB": 127
+                  },
+                  "dataDisks": [
+                    {
+                      "name": "[variables('dataDiskName')]",
+                      "lun": 0,
+                      "createOption": "Empty",
+                      "caching": "ReadWrite",
+                      "managedDisk": {
+                        "storageAccountType": "Premium_LRS"
+                      },
+                      "diskSizeGB": 512
+                    }
+                  ]
+                },
+                "networkProfile": {
+                  "networkInterfaces": [
+                    {
+                      "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]",
+                      "properties": {
+                        "primary": true
+                      }
+                    }
+                  ]
+                },
+                "diagnosticsProfile": {
+                  "bootDiagnostics": {
+                    "enabled": true
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Compute/virtualMachines/extensions",
+              "apiVersion": "2023-09-01",
+              "name": "[format('{0}/{1}', variables('vmName'), 'AzureMonitorWindowsAgent')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "publisher": "Microsoft.Azure.Monitor",
+                "type": "AzureMonitorWindowsAgent",
+                "typeHandlerVersion": "1.0",
+                "autoUpgradeMinorVersion": true,
+                "enableAutomaticUpgrade": true
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Compute/virtualMachines', variables('vmName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Compute/virtualMachines/extensions",
+              "apiVersion": "2023-09-01",
+              "name": "[format('{0}/{1}', variables('vmName'), 'SetupHyperV')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "publisher": "Microsoft.Compute",
+                "type": "CustomScriptExtension",
+                "typeHandlerVersion": "1.10",
+                "autoUpgradeMinorVersion": true,
+                "settings": {
+                  "commandToExecute": "powershell -ExecutionPolicy Unrestricted -Command \"Install-WindowsFeature -Name Hyper-V -IncludeManagementTools -Restart; Initialize-Disk -Number 2 -PartitionStyle GPT -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume -FileSystem NTFS -NewFileSystemLabel 'VMs' -Confirm:$false; New-Item -Path D:\\VMs -ItemType Directory -Force; New-Item -Path D:\\ISOs -ItemType Directory -Force; Set-VMHost -VirtualHardDiskPath D:\\VMs -VirtualMachinePath D:\\VMs\""
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Compute/virtualMachines/extensions', variables('vmName'), 'AzureMonitorWindowsAgent')]",
+                "[resourceId('Microsoft.Compute/virtualMachines', variables('vmName'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('dataCollectionRuleId')))]",
+              "type": "Microsoft.Insights/dataCollectionRuleAssociations",
+              "apiVersion": "2022-06-01",
+              "scope": "[format('Microsoft.Compute/virtualMachines/{0}', variables('vmName'))]",
+              "name": "[format('dcra-{0}-vminsights', variables('vmName'))]",
+              "properties": {
+                "dataCollectionRuleId": "[parameters('dataCollectionRuleId')]",
+                "description": "Association of data collection rule for VM Insights"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Compute/virtualMachines', variables('vmName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "vmName": {
+              "type": "string",
+              "metadata": {
+                "description": "Hyper-V host VM name"
+              },
+              "value": "[variables('vmName')]"
+            },
+            "vmId": {
+              "type": "string",
+              "metadata": {
+                "description": "Hyper-V host VM ID"
+              },
+              "value": "[resourceId('Microsoft.Compute/virtualMachines', variables('vmName'))]"
+            },
+            "publicIpAddress": {
+              "type": "string",
+              "metadata": {
+                "description": "Public IP address"
+              },
+              "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('publicIpName')), '2023-09-01').ipAddress]"
+            },
+            "fqdn": {
+              "type": "string",
+              "metadata": {
+                "description": "FQDN for RDP access"
+              },
+              "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('publicIpName')), '2023-09-01').dnsSettings.fqdn]"
+            },
+            "privateIpAddress": {
+              "type": "string",
+              "metadata": {
+                "description": "Private IP address"
+              },
+              "value": "[reference(resourceId('Microsoft.Network/networkInterfaces', variables('nicName')), '2023-09-01').ipConfigurations[0].properties.privateIPAddress]"
+            },
+            "adminUsername": {
+              "type": "string",
+              "metadata": {
+                "description": "Admin username"
+              },
+              "value": "[parameters('adminUsername')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').monitor), 'Microsoft.Resources/deployments', format('deploy-monitoring-{0}', deployment().name))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').network), 'Microsoft.Resources/deployments', format('deploy-networking-{0}', deployment().name))]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupNames').onprem)]"
+      ]
+    }
+  ],
+  "outputs": {
+    "resourceGroups": {
+      "type": "object",
+      "metadata": {
+        "description": "Resource group names"
+      },
+      "value": "[variables('resourceGroupNames')]"
+    },
+    "migrateProjectName": {
+      "type": "string",
+      "metadata": {
+        "description": "Azure Migrate project name"
+      },
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').hub), 'Microsoft.Resources/deployments', format('deploy-migrate-hub-{0}', deployment().name)), '2025-04-01').outputs.migrateProjectName.value]"
+    },
+    "recoveryServicesVaultName": {
+      "type": "string",
+      "metadata": {
+        "description": "Recovery Services Vault name"
+      },
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').hub), 'Microsoft.Resources/deployments', format('deploy-migrate-hub-{0}', deployment().name)), '2025-04-01').outputs.recoveryServicesVaultName.value]"
+    },
+    "keyVaultName": {
+      "type": "string",
+      "metadata": {
+        "description": "Key Vault name for migration secrets"
+      },
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').hub), 'Microsoft.Resources/deployments', format('deploy-migrate-hub-{0}', deployment().name)), '2025-04-01').outputs.keyVaultName.value]"
+    },
+    "hubVnetId": {
+      "type": "string",
+      "metadata": {
+        "description": "Hub Virtual Network ID"
+      },
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').network), 'Microsoft.Resources/deployments', format('deploy-networking-{0}', deployment().name)), '2025-04-01').outputs.hubVnetId.value]"
+    },
+    "targetSubnetId": {
+      "type": "string",
+      "metadata": {
+        "description": "Target subnet ID for migrated VMs"
+      },
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').network), 'Microsoft.Resources/deployments', format('deploy-networking-{0}', deployment().name)), '2025-04-01').outputs.targetSubnetId.value]"
+    },
+    "logAnalyticsWorkspaceId": {
+      "type": "string",
+      "metadata": {
+        "description": "Log Analytics Workspace ID"
+      },
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').monitor), 'Microsoft.Resources/deployments', format('deploy-monitoring-{0}', deployment().name)), '2025-04-01').outputs.logAnalyticsWorkspaceId.value]"
+    },
+    "hypervHostVmName": {
+      "type": "string",
+      "metadata": {
+        "description": "Hyper-V host VM name"
+      },
+      "value": "[if(parameters('deployHyperVHost'), coalesce(tryGet(tryGet(tryGet(if(parameters('deployHyperVHost'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').onprem), 'Microsoft.Resources/deployments', format('deploy-hyperv-host-{0}', deployment().name)), '2025-04-01'), null()), 'outputs'), 'vmName'), 'value'), 'Not deployed'), 'Not deployed')]"
+    },
+    "hypervHostPublicIp": {
+      "type": "string",
+      "metadata": {
+        "description": "Hyper-V host public IP (if deployed)"
+      },
+      "value": "[if(parameters('deployHyperVHost'), coalesce(tryGet(tryGet(tryGet(if(parameters('deployHyperVHost'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').onprem), 'Microsoft.Resources/deployments', format('deploy-hyperv-host-{0}', deployment().name)), '2025-04-01'), null()), 'outputs'), 'publicIpAddress'), 'value'), 'N/A'), 'N/A')]"
+    },
+    "hypervHostFqdn": {
+      "type": "string",
+      "metadata": {
+        "description": "Hyper-V host FQDN (if deployed)"
+      },
+      "value": "[if(parameters('deployHyperVHost'), coalesce(tryGet(tryGet(tryGet(if(parameters('deployHyperVHost'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').onprem), 'Microsoft.Resources/deployments', format('deploy-hyperv-host-{0}', deployment().name)), '2025-04-01'), null()), 'outputs'), 'fqdn'), 'value'), 'N/A'), 'N/A')]"
+    },
+    "bastionHostName": {
+      "type": "string",
+      "metadata": {
+        "description": "Bastion host name"
+      },
+      "value": "[if(parameters('deployBastion'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupNames').network), 'Microsoft.Resources/deployments', format('deploy-networking-{0}', deployment().name)), '2025-04-01').outputs.bastionHostName.value, 'Not deployed')]"
+    },
+    "deploymentSummary": {
+      "type": "object",
+      "metadata": {
+        "description": "Deployment summary"
+      },
+      "value": {
+        "location": "[parameters('location')]",
+        "prefix": "[parameters('environmentPrefix')]",
+        "hypervHostDeployed": "[parameters('deployHyperVHost')]",
+        "bastionDeployed": "[parameters('deployBastion')]",
+        "estimatedMonthlyCost": "[if(parameters('deployHyperVHost'), '$450-550 USD', '$150-250 USD')]"
+      }
+    }
+  }
+}

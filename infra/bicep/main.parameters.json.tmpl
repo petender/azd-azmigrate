@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "{{ .Env.AZURE_LOCATION }}"
+    },
+    "environmentPrefix": {
+      "value": "{{ .Env.AZURE_ENV_NAME }}"
+    },
+    "adminUsername": {
+      "value": "{{ .Env.ADMIN_USERNAME }}"
+    },
+    "adminPassword": {
+      "value": "{{ .Env.ADMIN_PASSWORD }}"
+    },
+    "deployHyperVHost": {
+      "value": "{{ .Env.DEPLOY_HYPERV_HOST }}"
+    },
+    "deployVpnGateway": {
+      "value": "{{ .Env.DEPLOY_VPN_GATEWAY }}"
+    },
+    "deployBastion": {
+      "value": "{{ .Env.DEPLOY_BASTION }}"
+    },
+    "hypervHostVmSize": {
+      "value": "{{ .Env.HYPERV_VM_SIZE }}"
+    },
+    "tags": {
+      "value": {
+        "Environment": "{{ .Env.AZURE_ENV_NAME }}",
+        "Project": "Azure-Migrate",
+        "ManagedBy": "azd",
+        "Purpose": "Migration-Demo"
+      }
+    }
+  }
+}

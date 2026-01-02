@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "${AZURE_LOCATION}"
+    },
+    "environmentPrefix": {
+      "value": "${AZURE_ENV_NAME}"
+    },
+    "adminUsername": {
+      "value": "${ADMIN_USERNAME}"
+    },
+    "adminPassword": {
+      "value": "${ADMIN_PASSWORD}"
+    },
+    "deployHyperVHost": {
+      "value": "${DEPLOY_HYPERV_HOST}"
+    },
+    "deployBastion": {
+      "value": "${DEPLOY_BASTION}"
+    },
+    "hypervHostVmSize": {
+      "value": "${HYPERV_VM_SIZE}"
+    },
+    "tags": {
+      "value": {
+        "Environment": "${AZURE_ENV_NAME}",
+        "Project": "Azure-Migrate",
+        "ManagedBy": "azd",
+        "Purpose": "Migration-Demo"
+      }
+    }
+  }
+}

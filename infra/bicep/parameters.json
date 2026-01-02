@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "eastus"
+    },
+    "environmentPrefix": {
+      "value": "migrate"
+    },
+    "adminUsername": {
+      "value": "azureadmin"
+    },
+    "adminPassword": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/{subscription-id}/resourceGroups/{rg-name}/providers/Microsoft.KeyVault/vaults/{vault-name}"
+        },
+        "secretName": "vmAdminPassword"
+      }
+    },
+    "deployHyperVHost": {
+      "value": true
+    },
+    "deployVpnGateway": {
+      "value": true
+    },
+    "deployBastion": {
+      "value": true
+    },
+    "hypervHostVmSize": {
+      "value": "Standard_D16s_v5"
+    },
+    "tags": {
+      "value": {
+        "Environment": "Demo",
+        "Project": "Azure-Migrate",
+        "ManagedBy": "Bicep",
+        "Purpose": "Migration-Demo",
+        "CostCenter": "IT-Demo",
+        "Owner": "Azure-Admin"
+      }
+    }
+  }
+}

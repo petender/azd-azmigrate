@@ -1,0 +1,64 @@
+# Azure Developer CLI
+.azure/*
+!.azure/migrate-demo/
+.azure/migrate-demo/.env
+*.env.backup
+
+# Bicep generated files
+*.json.template
+infra/**/*.json.template
+
+# Azure CLI
+.azure-credentials
+
+# Build outputs
+**/*.bicep.json
+**/ARM-Template/**
+
+# IDE and Editor folders
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Terraform (if added later)
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+
+# Secrets
+secrets.json
+*.secret
+*.pem
+*.pfx
+*.key
+
+# Local development
+local.settings.json
+appsettings.Development.json
+
+# Node modules (if JS tooling is added)
+node_modules/
+package-lock.json
+
+# Python (if scripts are added)
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Temporary files
+tmp/
+temp/
+*.tmp

@@ -32,12 +32,16 @@ if ($confirmation -ne 'Y' -and $confirmation -ne 'y') {
 
 $vmHost = Get-VMHost
 $baseVhdPath = "E:\VMs\BaseImages"
-$vmsPath = $vmHost.VirtualHardDiskPath
+$vmsPath = "E:\VMs\VirtualMachines"
 
-# Create base images directory
+# Create directories
 if (-not (Test-Path $baseVhdPath)) {
     New-Item -ItemType Directory -Path $baseVhdPath -Force | Out-Null
     Write-Host "Created directory: $baseVhdPath" -ForegroundColor Gray
+}
+if (-not (Test-Path $vmsPath)) {
+    New-Item -ItemType Directory -Path $vmsPath -Force | Out-Null
+    Write-Host "Created directory: $vmsPath" -ForegroundColor Gray
 }
 
 # Check for virtual switch
@@ -283,8 +287,39 @@ foreach ($vmConfig in $vmsToCreate) {
         $parentExt = [System.IO.Path]::GetExtension($vmConfig.BaseImage)
         $vmVhdPath = "$vmsPath\$vmName$parentExt"
         
-        Write-Host "    Copying base VHD..." -ForegroundColor DarkGray
-        Copy-Item -Path $vmConfig.BaseImage -Destination $vmVhdPath -Force
+        # Show file size and estimate
+        $sourceSize = (Get-Item $vmConfig.BaseImage).Length
+        $sizeGB = [math]::Round($sourceSize / 1GB, 2)
+        Write-Host "    Copying base VHD ($sizeGB GB)..." -ForegroundColor DarkGray
+        Write-Host "    This may take 1-3 minutes..." -ForegroundColor DarkGray
+        
+        # Copy with progress monitoring
+        $copyJob = Start-Job -ScriptBlock {
+            param($source, $dest)
+            Copy-Item -Path $source -Destination $dest -Force
+        } -ArgumentList $vmConfig.BaseImage, $vmVhdPath
+        
+        # Monitor copy progress
+        $activityId = Get-Random
+        while ($copyJob.State -eq 'Running') {
+            if (Test-Path $vmVhdPath) {
+                $copiedSize = (Get-Item $vmVhdPath).Length
+                $percentComplete = [math]::Min(99, [int](($copiedSize / $sourceSize) * 100))
+                $copiedGB = [math]::Round($copiedSize / 1GB, 2)
+                Write-Progress -Id $activityId -Activity "Creating $vmName" -Status "Copying VHD: $copiedGB GB / $sizeGB GB" -PercentComplete $percentComplete
+            } else {
+                Write-Progress -Id $activityId -Activity "Creating $vmName" -Status "Starting copy..." -PercentComplete 0
+            }
+            Start-Sleep -Milliseconds 500
+        }
+        
+        $copyResult = Receive-Job -Job $copyJob
+        Remove-Job -Job $copyJob
+        Write-Progress -Id $activityId -Activity "Creating $vmName" -Completed
+        
+        if (-not (Test-Path $vmVhdPath)) {
+            throw "Copy failed - VHD file not created"
+        }
         
         # Create VM using the copied VHD
         $vmParams = @{

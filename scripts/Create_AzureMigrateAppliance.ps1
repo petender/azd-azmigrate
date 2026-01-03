@@ -15,8 +15,16 @@ Write-Host "  1. Download Azure Migrate Appliance VHD (~12GB)" -ForegroundColor 
 Write-Host "  2. Extract and setup the appliance VM" -ForegroundColor Gray
 Write-Host "  3. Configure networking and requirements`n" -ForegroundColor Gray
 
+Write-Host "IMPORTANT: Get the latest appliance:" -ForegroundColor Yellow
+Write-Host "  This script will automatically download the latest appliance from:" -ForegroundColor White
+Write-Host "  https://go.microsoft.com/fwlink/?linkid=2191848" -ForegroundColor Cyan
+Write-Host "" -ForegroundColor White
+Write-Host "  Note: You'll need to register the appliance with Azure Portal after setup" -ForegroundColor Gray
+Write-Host "        Generate an appliance key from Azure Migrate > Discovery and Assessment" -ForegroundColor Gray
+Write-Host "" -ForegroundColor White
+
 Write-Host "Note: Make sure you have already created sample VMs" -ForegroundColor Yellow
-Write-Host "      using the CreateActualVMs.ps1 script`n" -ForegroundColor Gray
+Write-Host "      using the Create_SampleVMs.ps1 script`n" -ForegroundColor Gray
 
 $confirmation = Read-Host "Continue? (Y/N)"
 if ($confirmation -ne 'Y' -and $confirmation -ne 'y') {
@@ -94,8 +102,20 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 $applianceName = "AzureMigrateAppliance"
 $baseVhdPath = "E:\VMs\BaseImages"
 $applianceBasePath = "E:\VMs\VirtualMachines\$applianceName"
-$applianceZipUrl = "https://aka.ms/migrate/appliance/hyperv"
 $downloadPath = "$baseVhdPath\AzureMigrateAppliance.zip"
+
+# Use latest appliance URL
+$applianceZipUrl = "https://go.microsoft.com/fwlink/?linkid=2191848"
+
+# Check if appliance file already exists
+if (Test-Path $downloadPath) {
+    Write-Host "Found existing appliance file: $downloadPath" -ForegroundColor Green
+    $size = [math]::Round((Get-Item $downloadPath).Length / 1GB, 2)
+    Write-Host "  Size: $size GB" -ForegroundColor Gray
+    Write-Host "  Skipping download" -ForegroundColor Gray
+} else {
+    Write-Host "Appliance file not found, will download automatically" -ForegroundColor Yellow
+}
 
 # Create directories
 if (-not (Test-Path $baseVhdPath)) {
@@ -112,15 +132,42 @@ if ($existingVM) {
     Write-Host "Appliance VM already exists" -ForegroundColor Green
     Write-Host "  VM Name: $applianceName" -ForegroundColor Gray
     $recreate = Read-Host "`nDelete and recreate? (Y/N)"
-    if ($recreate -ne 'Y' -and $recreate -ne 'y') {
-        Write-Host "Using existing appliance VM" -ForegroundColor Yellow
-        # Skip to summary
-        $skipSetup = $true
-    } else {
-        # Remove existing VM
+    
+    if ($recreate -eq 'Y' -or $recreate -eq 'y') {
+        # Remove existing VM and its VHDs
         Stop-VM -Name $applianceName -Force -ErrorAction SilentlyContinue
+        
+        # Get VM's VHD paths before removing
+        $vmDisks = Get-VMHardDiskDrive -VMName $applianceName -ErrorAction SilentlyContinue
+        
         Remove-VM -Name $applianceName -Force
         Write-Host "Removed existing VM" -ForegroundColor Green
+        
+        # Clean up old appliance VHDs if recreating
+        if ($vmDisks) {
+            Write-Host "  Removing old appliance VHD files..." -ForegroundColor Gray
+            foreach ($disk in $vmDisks) {
+                if ($disk.Path -and (Test-Path $disk.Path)) {
+                    try {
+                        Remove-Item -Path $disk.Path -Force -ErrorAction Stop
+                        Write-Host "    Deleted: $(Split-Path -Leaf $disk.Path)" -ForegroundColor DarkGray
+                    } catch {
+                        Write-Host "    Warning: Could not delete $(Split-Path -Leaf $disk.Path)" -ForegroundColor Yellow
+                    }
+                }
+            }
+        }
+        
+        # Also clean up the appliance directory if it exists
+        if (Test-Path $applianceBasePath) {
+            try {
+                Remove-Item -Path $applianceBasePath -Recurse -Force -ErrorAction Stop
+                Write-Host "  Cleaned appliance directory" -ForegroundColor DarkGray
+            } catch {
+                Write-Host "  Warning: Could not clean appliance directory" -ForegroundColor Yellow
+            }
+        }
+        
         $skipSetup = $false
     }
 } else {
@@ -213,9 +260,15 @@ if (-not $skipSetup) {
         Write-Host "  Importing VM from: $vmConfigFile" -ForegroundColor Gray
         
         try {
+            # Ensure appliance directory exists and is empty
+            if (-not (Test-Path $applianceBasePath)) {
+                New-Item -ItemType Directory -Path $applianceBasePath -Force | Out-Null
+                Write-Host "  Created appliance directory: $applianceBasePath" -ForegroundColor DarkGray
+            }
+            
             # Use Compare-VM to check for issues before importing
             Write-Host "  Checking VM compatibility..." -ForegroundColor DarkGray
-            $vmReport = Compare-VM -Path $vmConfigFile -Copy -GenerateNewId -VhdDestinationPath $applianceDir
+            $vmReport = Compare-VM -Path $vmConfigFile -Copy -GenerateNewId -VhdDestinationPath $applianceBasePath
             
             # Check and fix incompatibilities
             if ($vmReport.Incompatibilities) {

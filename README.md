@@ -37,23 +37,6 @@ azd provision
 
 **Total time:** ~2 hours (mostly automated downloads)
 
-📚 **Complete Step-by-Step Guide:** [DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md)  
-📚 **Azure Developer CLI Details:** [AZD-DEPLOYMENT.md](AZD-DEPLOYMENT.md)
-
-### Alternative: Deploy with Azure CLI
-
-For Bicep-only deployment without azd:
-
-```powershell
-cd infra/bicep
-az deployment sub create \
-  --name "migrate-demo-$(Get-Date -Format 'yyyyMMdd-HHmmss')" \
-  --location eastus \
-  --template-file main.bicep \
-  --parameters parameters.dev.json \
-  --parameters adminPassword="<secure-password>"
-```
-
 📚 **Bicep Documentation:** [infra/bicep/README.md](infra/bicep/README.md)
 
 ## 📁 Project Structure
@@ -102,20 +85,6 @@ azd-azmigrate/
 - Imports VM with compatibility fixes
 - Connects to Hyper-V network
 - Time: 30-45 minutes
-
-## 💰 Cost Estimates
-
-| Configuration | Monthly Cost | Details |
-|---------------|--------------|---------|
-| **Full Demo** | $450-550 | Includes D16s_v5 Hyper-V host, Bastion |
-| **No Hyper-V** | $150-250 | External Hyper-V environment |
-| **Cost-Optimized** | $300-400 | D8s_v5 VM, basic monitoring |
-| **Minimal** | $50-100 | Network and migrate hub only |
-
-### Cost Savings
-- **Stop Hyper-V VM** when not in use: **Save ~$450/month**
-- **Use smaller VM** (D8s_v5): **Save ~$225/month**
-- **Remove Bastion**: **Save ~$135/month**
 
 ## 🎯 Demo Features
 
@@ -182,13 +151,6 @@ azd-azmigrate/
 4. Username: `azureadmin`
 5. Password: (from deployment parameters)
 
-**Via RDP:**
-```powershell
-# Get public IP
-azd env get-value HYPERVHOSTPUBLICIP
-# Connect with mstsc
-```
-
 ### Setup Sample VMs and Appliance
 
 After infrastructure deployment, configure the on-premises simulation:
@@ -213,7 +175,7 @@ On the Hyper-V host, run:
 This will:
 - Download Windows Server 2022 VHD (~10GB)
 - Download Ubuntu 24.04 VHD (~2GB)
-- Create 6 VMs: WIN-SQL-01/02, WIN-WEB-01/02, WIN-APP-01, LIN-DB-01
+- Create 6 VMs: WIN-SQL-01, WIN-WEB-01, WIN-APP-01, LIN-DB-01
 - Time: 30-45 minutes
 
 **Step 3: Setup Azure Migrate Appliance**
@@ -243,70 +205,13 @@ This will:
 
 ```powershell
 # With azd
-azd down --purge
+azd down --purge --force
 
 # Or manually
 az group list --query "[?starts_with(name, 'rg-migrate')].name" -o tsv | ForEach-Object {
     az group delete --name $_ --yes --no-wait
 }
 ```
-
-## 📚 Documentation
-
-- **[AZD-DEPLOYMENT.md](AZD-DEPLOYMENT.md)** - Complete Azure Developer CLI guide
-- **[infra/bicep/README.md](infra/bicep/README.md)** - Detailed Bicep documentation
-- **[infra/bicep/QUICKSTART.md](infra/bicep/QUICKSTART.md)** - 5-minute quick start
-
-## 🛠️ Customization
-
-### Deployment Options
-
-Configure via environment variables (azd) or parameters file:
-
-```powershell
-# Hyper-V Host
-DEPLOY_HYPERV_HOST=true        # Deploy on-premises simulation
-HYPERV_VM_SIZE=Standard_D16s_v5  # VM size for Hyper-V host
-
-# Networking
-DEPLOY_VPN_GATEWAY=true        # VPN Gateway for hybrid connectivity
-DEPLOY_BASTION=true            # Azure Bastion for secure access
-
-# Location
-AZURE_LOCATION=eastus          # Azure region
-```
-
-### Supported Regions
-- eastus
-- westeurope
-- westus2
-- northeurope
-
-### Supported VM Sizes (Hyper-V Host)
-- Standard_D16s_v5 (recommended)
-- Standard_D16s_v4
-- Standard_E16s_v5
-- Standard_D8s_v5 (cost-optimized)
-
-## 🔧 Troubleshooting
-
-### Common Issues
-
-**Deployment timeout:** VPN Gateway takes 30-45 minutes - this is normal.
-
-**Quota exceeded:**
-```powershell
-az vm list-usage --location eastus --query "[?name.value=='standardDSv5Family']"
-```
-
-**Nested virtualization not working:** Ensure you're using a supported VM size (DSv5 or ESv5 series).
-
-## 📖 Next Steps (Roadmap)
-
-- [x] **Phase 2:** Automated VM provisioning scripts for Hyper-V ✅
-- [ ] **Phase 3:** Sample application deployment
-- [ ] **Phase 4:** Migration orchestration scripts
-- [ ] **Phase 5:** Performance testing and optimization
 
 ## 🤝 Contributing
 

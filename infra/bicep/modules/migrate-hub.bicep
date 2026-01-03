@@ -2,9 +2,13 @@
 // Azure Migrate Hub Module
 // =====================================================
 // Creates Azure Migrate project and supporting resources:
-// - Azure Migrate project
+// - Azure Migrate project with system-assigned identity
+// - Assessment project for server assessments
+// - Hyper-V site for discovery
+// - Master site for coordinating discovery
+// - Solutions for discovery, assessment, and migration
 // - Recovery Services Vault for replication
-// - Key Vault for secrets management
+// - Key Vault for appliance secrets
 // - Storage account for migrate appliance and cache
 
 @description('Azure region for resources')
@@ -19,6 +23,9 @@ param logAnalyticsWorkspaceId string = ''
 @description('Enable diagnostic settings (requires workspace to be fully provisioned)')
 param enableDiagnostics bool = false
 
+@description('Appliance name for Hyper-V discovery')
+param applianceName string = 'AzureMigrateAppliance'
+
 @description('Resource tags')
 param tags object
 
@@ -27,8 +34,11 @@ param tags object
 // =====================================================
 
 var migrateProjectName = 'migrate-project-${namingPrefix}'
+var assessmentProjectName = '${migrateProjectName}-assessment'
+var hyperVSiteName = '${migrateProjectName}-hyperv-site'
+var masterSiteName = '${migrateProjectName}-master-site'
 var recoveryVaultName = 'rsv-${namingPrefix}'
-var keyVaultName = 'kv-${take(namingPrefix, 21)}' // Key Vault names max 24 chars
+var keyVaultName = 'kv-${take(replace(namingPrefix, '-', ''), 21)}' // Key Vault names max 24 chars
 var storageAccountName = 'stm${replace(namingPrefix, '-', '')}' // Storage for migrate appliance
 var cacheStorageName = 'stc${replace(namingPrefix, '-', '')}' // Storage for cache
 
@@ -218,10 +228,135 @@ resource recoveryVaultDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05
 resource migrateProject 'Microsoft.Migrate/migrateProjects@2020-06-01-preview' = {
   name: migrateProjectName
   location: location
-  tags: tags
+  tags: union(tags, {
+    'Migrate Project': migrateProjectName
+  })
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     publicNetworkAccess: 'Enabled'
     utilityStorageAccountId: storageAccount.id
+  }
+}
+
+// =====================================================
+// Assessment Project for Server Assessments
+// =====================================================
+
+resource assessmentProject 'Microsoft.Migrate/assessmentProjects@2023-05-01-preview' = {
+  name: assessmentProjectName
+  location: location
+  tags: union(tags, {
+    'Migrate Project': migrateProjectName
+  })
+  properties: {
+    assessmentSolutionId: '${migrateProject.id}/solutions/Servers-Assessment-ServerAssessment'
+    projectStatus: 'Active'
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+// =====================================================
+// Master Site for Coordinating Discovery
+// =====================================================
+
+resource masterSite 'Microsoft.OffAzure/MasterSites@2023-06-06' = {
+  name: masterSiteName
+  location: location
+  tags: union(tags, {
+    'Migrate Project': migrateProjectName
+  })
+  properties: {
+    allowMultipleSites: true
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+// =====================================================
+// Hyper-V Site for Discovery
+// =====================================================
+
+resource hyperVSite 'Microsoft.OffAzure/HyperVSites@2023-06-06' = {
+  name: hyperVSiteName
+  location: location
+  tags: union(tags, {
+    'Migrate Project': migrateProjectName
+  })
+  properties: {
+    applianceName: applianceName
+    discoverySolutionId: '${migrateProject.id}/solutions/Servers-Discovery-ServerDiscovery'
+    agentDetails: {
+      keyVaultId: keyVault.id
+      keyVaultUri: keyVault.properties.vaultUri
+    }
+  }
+  dependsOn: [
+    masterSite
+  ]
+}
+
+// =====================================================
+// Azure Migrate Solutions
+// =====================================================
+
+// Server Discovery Solution
+resource discoverySolution 'Microsoft.Migrate/migrateProjects/solutions@2020-06-01-preview' = {
+  parent: migrateProject
+  name: 'Servers-Discovery-ServerDiscovery'
+  properties: {
+    tool: 'ServerDiscovery'
+    purpose: 'Discovery'
+    goal: 'Servers'
+    status: 'Active'
+  }
+}
+
+// Server Assessment Solution
+resource assessmentSolution 'Microsoft.Migrate/migrateProjects/solutions@2020-06-01-preview' = {
+  parent: migrateProject
+  name: 'Servers-Assessment-ServerAssessment'
+  properties: {
+    tool: 'ServerAssessment'
+    purpose: 'Assessment'
+    goal: 'Servers'
+    status: 'Active'
+  }
+}
+
+// Server Migration Solution
+resource migrationSolution 'Microsoft.Migrate/migrateProjects/solutions@2020-06-01-preview' = {
+  parent: migrateProject
+  name: 'Servers-Migration-ServerMigration'
+  properties: {
+    tool: 'ServerMigration'
+    purpose: 'Migration'
+    goal: 'Servers'
+    status: 'Active'
+  }
+}
+
+// Server Migration Data Replication Solution
+resource migrationDataReplicationSolution 'Microsoft.Migrate/migrateProjects/solutions@2020-06-01-preview' = {
+  parent: migrateProject
+  name: 'Servers-Migration-ServerMigration_DataReplication'
+  properties: {
+    tool: 'ServerMigration_DataReplication'
+    purpose: 'Migration'
+    goal: 'Servers'
+    status: 'Active'
+  }
+}
+
+// Server Discovery Import Solution
+resource discoveryImportSolution 'Microsoft.Migrate/migrateProjects/solutions@2020-06-01-preview' = {
+  parent: migrateProject
+  name: 'Servers-Discovery-ServerDiscovery_Import'
+  properties: {
+    tool: 'ServerDiscovery_Import'
+    purpose: 'Discovery'
+    goal: 'Servers'
+    status: 'Active'
   }
 }
 
@@ -234,6 +369,24 @@ output migrateProjectName string = migrateProject.name
 
 @description('Azure Migrate project ID')
 output migrateProjectId string = migrateProject.id
+
+@description('Assessment project name')
+output assessmentProjectName string = assessmentProject.name
+
+@description('Assessment project ID')
+output assessmentProjectId string = assessmentProject.id
+
+@description('Hyper-V site name')
+output hyperVSiteName string = hyperVSite.name
+
+@description('Hyper-V site ID')
+output hyperVSiteId string = hyperVSite.id
+
+@description('Master site name')
+output masterSiteName string = masterSite.name
+
+@description('Master site ID')
+output masterSiteId string = masterSite.id
 
 @description('Recovery Services Vault name')
 output recoveryServicesVaultName string = recoveryVault.name

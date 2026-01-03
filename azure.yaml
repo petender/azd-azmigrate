@@ -1,8 +1,8 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
 
-name: azd-azmigrate
+name: tdd-azd-azmigrate
 metadata:
-  template: azd-azmigrate@0.0.1-beta
+  template: tdd-azd-azmigrate@0.0.1-beta
 
 # Infrastructure deployment configuration
 infra:
@@ -16,60 +16,34 @@ hooks:
     windows:
       shell: pwsh
       run: |
+        Write-Host ""
         Write-Host "======================================"
-        Write-Host "Azure Migrate Demo Environment Deployed!"
+        Write-Host "Azure Migrate Demo - Deployment Complete!"
         Write-Host "======================================"
         Write-Host ""
-        
-        # Get deployment outputs
-        $envName = azd env get-value AZURE_ENV_NAME
-        $deploymentName = az deployment sub list --query "[?contains(name, 'mig1026am')].name | [0]" -o tsv
-        
-        if ($deploymentName) {
-          $outputs = az deployment sub show --name $deploymentName --query "properties.outputs" -o json | ConvertFrom-Json
-          
-          Write-Host "Connection Information:"
-          Write-Host "  Hyper-V Host Public IP: $($outputs.hypervHostPublicIp.value)"
-          Write-Host "  Hyper-V Host FQDN: $($outputs.hypervHostFqdn.value)"
-          Write-Host "  Azure Bastion: $($outputs.bastionHostName.value)"
-          Write-Host ""
-          Write-Host "Azure Migrate Resources:"
-          Write-Host "  Project Name: $($outputs.migrateProjectName.value)"
-          Write-Host "  Key Vault: $($outputs.keyVaultName.value)"
-          Write-Host "  Recovery Vault: $($outputs.recoveryServicesVaultName.value)"
-          Write-Host ""
-          
-          # Run interactive menu script
-          $menuScript = Join-Path $PSScriptRoot "scripts\Setup-AzureMigrateMenu.ps1"
-          if (Test-Path $menuScript) {
-            & $menuScript -EnvironmentName $envName
-          }
-            $username = azd env get-value ADMIN_USERNAME
-          
-          # Run interactive menu script
-          $menuScript = Join-Path $PSScriptRoot "scripts\Setup-AzureMigrateMenu.ps1"
-          if (Test-Path $menuScript) {
-            & $menuScript -EnvironmentName $envName
-          }
-        } else {
-          Write-Host "  Unable to retrieve deployment outputs"
-        }
-        
+        Write-Host "Next Steps:" -ForegroundColor Yellow
+        Write-Host "  1. Connect to Hyper-V host via Azure Bastion in the Azure Portal"
+        Write-Host "  2. Copy the CreateActualVMs.ps1 script to the VM"
+        Write-Host "  3. Run the script to create sample VMs"
+        Write-Host "  4. Setup Azure Migrate appliance for discovery"
+        Write-Host ""
+        Write-Host "For detailed instructions, see:" -ForegroundColor Cyan
+        Write-Host "  QUICKSTART.md or SCENARIOS.md"
         Write-Host ""
     posix:
       shell: sh
       run: |
-        echo "======================================"
-        echo "Azure Migrate Demo Environment Deployed!"
-        echo "======================================"
         echo ""
-        echo "Connection Information:"
-        echo "  Hyper-V Host Public IP: $(azd env get-value HYPERVHOSTPUBLICIP)"
-        echo "  Hyper-V Host FQDN: $(azd env get-value HYPERVHOSTFQDN)"
-        echo "  Azure Bastion: $(azd env get-value BASTIONHOSTNAME)"
+        echo "======================================"
+        echo "Azure Migrate Demo - Deployment Complete!"
+        echo "======================================"
         echo ""
         echo "Next Steps:"
-        echo "  1. Connect to Hyper-V host via Azure Bastion"
-        echo "  2. Download Azure Migrate appliance VHD"
-        echo "  3. Configure discovery in Azure Migrate"
+        echo "  1. Connect to Hyper-V host via Azure Bastion in the Azure Portal"
+        echo "  2. Copy the CreateActualVMs.ps1 script to the VM"
+        echo "  3. Run the script to create sample VMs"
+        echo "  4. Setup Azure Migrate appliance for discovery"
+        echo ""
+        echo "For detailed instructions, see:"
+        echo "  QUICKSTART.md or SCENARIOS.md"
         echo ""

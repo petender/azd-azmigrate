@@ -26,7 +26,7 @@ targetScope = 'subscription'
   'canadacentral'
   'australiaeast'
 ])
-param location string = 'centralus'
+param location string 
 
 @description('Environment prefix for resource naming')
 @minLength(3)

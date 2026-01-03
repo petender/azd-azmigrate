@@ -32,13 +32,41 @@ if ($confirmation -ne 'Y' -and $confirmation -ne 'y') {
 Write-Host "`nChecking for virtual switch..." -ForegroundColor Cyan
 $switches = Get-VMSwitch
 if ($switches) {
+    # Use existing switch
     $switchName = $switches[0].Name
-    Write-Host "  Using switch: $switchName" -ForegroundColor Green
+    Write-Host "  Using switch: $switchName ($($switches[0].SwitchType))" -ForegroundColor Green
 } else {
-    Write-Host "  Creating Internal switch..." -ForegroundColor Gray
-    $switchName = "Internal-Switch"
-    New-VMSwitch -Name $switchName -SwitchType Internal | Out-Null
-    Write-Host "  Created switch: $switchName" -ForegroundColor Green
+    # Create External switch for internet access
+    Write-Host "  Creating External switch for internet access..." -ForegroundColor Gray
+    
+    # Find physical network adapters (not virtual)
+    $netAdapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.Virtual -eq $false }
+    
+    if ($netAdapters -and $netAdapters.Count -gt 0) {
+        $netAdapter = $netAdapters[0]
+        $switchName = "External-Switch"
+        
+        try {
+            New-VMSwitch -Name $switchName -NetAdapterName $netAdapter.Name -AllowManagementOS $true -ErrorAction Stop | Out-Null
+            Write-Host "  Created switch: $switchName (External - bound to $($netAdapter.Name))" -ForegroundColor Green
+        } catch {
+            Write-Host "  Failed to create External switch: $_" -ForegroundColor Yellow
+            Write-Host "  Creating Internal switch instead..." -ForegroundColor Gray
+            $switchName = "Internal-Switch"
+            New-VMSwitch -Name $switchName -SwitchType Internal | Out-Null
+            Write-Host "  Created switch: $switchName (Internal - no internet access)" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "  Warning: No physical network adapter found" -ForegroundColor Yellow
+        Write-Host "  Available adapters:" -ForegroundColor Gray
+        Get-NetAdapter | Where-Object Status -eq 'Up' | ForEach-Object {
+            Write-Host "    - $($_.Name): $($_.InterfaceDescription) (Virtual: $($_.Virtual))" -ForegroundColor DarkGray
+        }
+        Write-Host "  Creating Internal switch..." -ForegroundColor Gray
+        $switchName = "Internal-Switch"
+        New-VMSwitch -Name $switchName -SwitchType Internal | Out-Null
+        Write-Host "  Created switch: $switchName (Internal - no internet access)" -ForegroundColor Yellow
+    }
 }
 
 # Check for existing sample VMs
@@ -78,35 +106,35 @@ if (-not (Test-Path $applianceDir)) {
     New-Item -ItemType Directory -Path $applianceDir -Force | Out-Null
 }
 
-# Check for existing appliance disk
-$existingVhdx = "$applianceBasePath.vhdx"
-$existingVhd = "$applianceBasePath.vhd"
-$applianceDiskPath = $null
-
-if (Test-Path $existingVhdx) {
-    $applianceDiskPath = $existingVhdx
-    Write-Host "Appliance VHDX already exists" -ForegroundColor Green
-    Write-Host "  Path: $applianceDiskPath" -ForegroundColor Gray
-} elseif (Test-Path $existingVhd) {
-    $applianceDiskPath = $existingVhd
-    Write-Host "Appliance VHD already exists" -ForegroundColor Green
-    Write-Host "  Path: $applianceDiskPath" -ForegroundColor Gray
-}
-
-if ($applianceDiskPath) {
-    $overwrite = Read-Host "`nDelete and re-download? (Y/N)"
-    if ($overwrite -ne 'Y' -and $overwrite -ne 'y') {
-        Write-Host "Using existing appliance file" -ForegroundColor Yellow
+# Check if VM already exists
+$existingVM = Get-VM -Name $applianceName -ErrorAction SilentlyContinue
+if ($existingVM) {
+    Write-Host "Appliance VM already exists" -ForegroundColor Green
+    Write-Host "  VM Name: $applianceName" -ForegroundColor Gray
+    $recreate = Read-Host "`nDelete and recreate? (Y/N)"
+    if ($recreate -ne 'Y' -and $recreate -ne 'y') {
+        Write-Host "Using existing appliance VM" -ForegroundColor Yellow
+        # Skip to summary
+        $skipSetup = $true
     } else {
-        Remove-Item $applianceDiskPath -Force
-        if (Test-Path $downloadPath) {
-            Remove-Item $downloadPath -Force
-        }
-        $applianceDiskPath = $null
+        # Remove existing VM
+        Stop-VM -Name $applianceName -Force -ErrorAction SilentlyContinue
+        Remove-VM -Name $applianceName -Force
+        Write-Host "Removed existing VM" -ForegroundColor Green
+        $skipSetup = $false
     }
+} else {
+    $skipSetup = $false
 }
 
-if (-not $applianceDiskPath) {
+if (-not $skipSetup) {
+    # Initialize variables
+    $vmConfigFile = $null
+    $applianceExtractPath = $null
+    # Initialize variables
+    $vmConfigFile = $null
+    $applianceExtractPath = $null
+    
     if (-not (Test-Path $downloadPath)) {
         Write-Host "Downloading Azure Migrate Appliance (~12GB)..." -ForegroundColor Yellow
         Write-Host "  This will take 10-30 minutes depending on connection" -ForegroundColor Gray
@@ -140,41 +168,28 @@ if (-not $applianceDiskPath) {
     try {
         Expand-Archive -Path $downloadPath -DestinationPath $extractPath -Force
         
-        Write-Host "  Searching for VHD/VHDX file..." -ForegroundColor DarkGray
-        $vhdxFile = Get-ChildItem -Path $extractPath -Filter "*.vhdx" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        $vhdFile = Get-ChildItem -Path $extractPath -Filter "*.vhd" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        Write-Host "  Searching for VM configuration..." -ForegroundColor DarkGray
         
-        if (-not $vhdFile -and -not $vhdxFile) {
-            Write-Host "`n  Error: No VHD/VHDX file found!" -ForegroundColor Red
+        # Find the VM configuration files
+        $vmcxFiles = Get-ChildItem -Path $extractPath -Filter "*.vmcx" -Recurse -ErrorAction SilentlyContinue
+        $xmlFiles = Get-ChildItem -Path $extractPath -Filter "*.xml" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -eq "Virtual Machines" }
+        
+        $vmConfigFile = $null
+        if ($vmcxFiles) {
+            $vmConfigFile = $vmcxFiles[0].FullName
+            Write-Host "  Found VM config: $($vmcxFiles[0].Name)" -ForegroundColor DarkGray
+        } elseif ($xmlFiles) {
+            $vmConfigFile = $xmlFiles[0].FullName
+            Write-Host "  Found VM config: $($xmlFiles[0].Name)" -ForegroundColor DarkGray
+        } else {
+            Write-Host "`n  Error: No VM configuration file found!" -ForegroundColor Red
             Write-Host "  Contents of archive:" -ForegroundColor Yellow
             Get-ChildItem -Path $extractPath -Recurse | Select-Object FullName
-            throw "No appliance disk image found in downloaded archive"
+            throw "No VM configuration file found in downloaded archive"
         }
         
-        if ($vhdxFile) {
-            Write-Host "  Found VHDX: $($vhdxFile.Name)" -ForegroundColor DarkGray
-            $applianceDiskPath = "$applianceBasePath.vhdx"
-            Write-Host "  Copying to final location..." -ForegroundColor DarkGray
-            Copy-Item -Path $vhdxFile.FullName -Destination $applianceDiskPath -Force
-        } elseif ($vhdFile) {
-            Write-Host "  Found VHD: $($vhdFile.Name)" -ForegroundColor DarkGray
-            $applianceDiskPath = "$applianceBasePath.vhd"
-            Write-Host "  Copying to final location..." -ForegroundColor DarkGray
-            Copy-Item -Path $vhdFile.FullName -Destination $applianceDiskPath -Force
-        }
-        
-        Write-Host "  Saved: $applianceDiskPath" -ForegroundColor Green
-        
-        # Cleanup - use SilentlyContinue for locked files
-        Write-Host "  Cleaning up temporary files..." -ForegroundColor DarkGray
-        Start-Sleep -Seconds 1
-        Remove-Item $extractPath -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item $downloadPath -Force -ErrorAction SilentlyContinue
-        
-        if (Test-Path $extractPath) {
-            Write-Host "  Note: Some temporary files couldn't be deleted (files in use)" -ForegroundColor Yellow
-            Write-Host "        You can manually delete: $extractPath" -ForegroundColor Gray
-        }
+        # Store the extract path for later use
+        $applianceExtractPath = $extractPath
         
     } catch {
         Write-Host "`n  Extraction failed: $_" -ForegroundColor Red
@@ -186,32 +201,93 @@ if (-not $applianceDiskPath) {
 }
 
 # =====================================================
-# Create Appliance VM
+# Import Appliance VM
 # =====================================================
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host " Step 2: Create Appliance VM" -ForegroundColor White
+Write-Host " Step 2: Import Appliance VM" -ForegroundColor White
 Write-Host "========================================`n" -ForegroundColor Cyan
 
-# Check if VM already exists
-$existingVM = Get-VM -Name $applianceName -ErrorAction SilentlyContinue
-if ($existingVM) {
-    Write-Host "  Appliance VM already exists, skipping" -ForegroundColor Yellow
-} else {
-    Write-Host "  Creating VM with disk: $applianceDiskPath" -ForegroundColor Gray
-    
-    $appParams = @{
-        Name = $applianceName
-        MemoryStartupBytes = 16GB
-        Generation = 2
-        VHDPath = $applianceDiskPath
-        SwitchName = $switchName
+if (-not $skipSetup) {
+    if ($vmConfigFile) {
+        Write-Host "  Importing VM from: $vmConfigFile" -ForegroundColor Gray
+        
+        try {
+            # Use Compare-VM to check for issues before importing
+            Write-Host "  Checking VM compatibility..." -ForegroundColor DarkGray
+            $vmReport = Compare-VM -Path $vmConfigFile -Copy -GenerateNewId -VhdDestinationPath $applianceDir
+            
+            # Check and fix incompatibilities
+            if ($vmReport.Incompatibilities) {
+                Write-Host "  Found $($vmReport.Incompatibilities.Count) compatibility issue(s), fixing..." -ForegroundColor Yellow
+                
+                foreach ($incompatibility in $vmReport.Incompatibilities) {
+                    Write-Host "    Issue: $($incompatibility.Message)" -ForegroundColor DarkGray
+                    
+                    # Fix network switch issues
+                    if ($incompatibility.Message -match "switch" -or $incompatibility.MessageId -eq 33012) {
+                        $networkAdapter = $incompatibility.Source
+                        if ($networkAdapter) {
+                            # Clear static MAC if set, then connect to switch
+                            Set-VMNetworkAdapter -VMNetworkAdapter $networkAdapter -DynamicMacAddress -ErrorAction SilentlyContinue
+                            Connect-VMNetworkAdapter -VMNetworkAdapter $networkAdapter -SwitchName $switchName
+                            Write-Host "    Fixed: Connected network adapter to '$switchName'" -ForegroundColor Green
+                        }
+                    }
+                }
+                
+                # Refresh the compatibility report after fixes
+                $vmReport = Compare-VM -CompatibilityReport $vmReport
+                
+                if ($vmReport.Incompatibilities) {
+                    Write-Host "`n  Warning: Some issues could not be auto-fixed:" -ForegroundColor Yellow
+                    foreach ($incompatibility in $vmReport.Incompatibilities) {
+                        Write-Host "    - $($incompatibility.Message)" -ForegroundColor Gray
+                    }
+                }
+            } else {
+                Write-Host "  No compatibility issues found" -ForegroundColor Green
+            }
+            
+            # Import the VM using the report
+            Write-Host "  Importing VM..." -ForegroundColor DarkGray
+            $importedVM = Import-VM -CompatibilityReport $vmReport
+            
+            # Rename the VM
+            Rename-VM -VM $importedVM -NewName $applianceName
+            
+            Write-Host "  VM imported successfully" -ForegroundColor Green
+            
+            # Verify network adapter connection
+            Write-Host "  Verifying network configuration..." -ForegroundColor Gray
+            $vmNetAdapter = Get-VMNetworkAdapter -VMName $applianceName
+            if ($vmNetAdapter) {
+                if (-not $vmNetAdapter.SwitchName) {
+                    Connect-VMNetworkAdapter -VMNetworkAdapter $vmNetAdapter -SwitchName $switchName
+                }
+                Write-Host "  Network adapter connected to: $switchName" -ForegroundColor Green
+            }
+            
+            # Cleanup extraction folder
+            Write-Host "  Cleaning up temporary files..." -ForegroundColor DarkGray
+            Start-Sleep -Seconds 2
+            Remove-Item $applianceExtractPath -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item $downloadPath -Force -ErrorAction SilentlyContinue
+            
+            if (Test-Path $applianceExtractPath) {
+                Write-Host "  Note: Some temporary files couldn't be deleted" -ForegroundColor Yellow
+                Write-Host "        You can manually delete: $applianceExtractPath" -ForegroundColor Gray
+            }
+            
+        } catch {
+            Write-Host "`n  VM import failed: $_" -ForegroundColor Red
+            throw
+        }
+    } else {
+        Write-Host "  Error: No VM configuration available for import" -ForegroundColor Red
     }
-    
-    New-VM @appParams | Out-Null
-    Set-VM -Name $applianceName -ProcessorCount 4 -DynamicMemory -MemoryMinimumBytes 8GB -MemoryMaximumBytes 16GB
-    
-    Write-Host "  Appliance VM created" -ForegroundColor Green
+} else {
+    Write-Host "  Using existing appliance VM" -ForegroundColor Yellow
 }
 
 # =====================================================

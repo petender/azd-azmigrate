@@ -9,12 +9,31 @@ Write-Host "`nChecking for virtual switch..." -ForegroundColor Cyan
 $switches = Get-VMSwitch
 if ($switches) {
     $switchName = $switches[0].Name
-    Write-Host "Using existing switch: $switchName" -ForegroundColor Green
+    Write-Host "Using existing switch: $switchName ($($switches[0].SwitchType))" -ForegroundColor Green
 } else {
-    Write-Host "No switch found, creating Internal switch..." -ForegroundColor Yellow
-    $switchName = "Internal-Switch"
-    New-VMSwitch -Name $switchName -SwitchType Internal | Out-Null
-    Write-Host "Created switch: $switchName" -ForegroundColor Green
+    Write-Host "No switch found, creating External switch..." -ForegroundColor Yellow
+    
+    # Find physical (non-virtual) network adapters
+    $netAdapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.Virtual -eq $false }
+    
+    if ($netAdapters -and $netAdapters.Count -gt 0) {
+        $netAdapter = $netAdapters[0]
+        $switchName = "External-Switch"
+        
+        try {
+            New-VMSwitch -Name $switchName -NetAdapterName $netAdapter.Name -AllowManagementOS $true -ErrorAction Stop | Out-Null
+            Write-Host "Created switch: $switchName (External - Internet access)" -ForegroundColor Green
+        } catch {
+            Write-Host "Failed to create External switch, using Internal instead" -ForegroundColor Yellow
+            $switchName = "Internal-Switch"
+            New-VMSwitch -Name $switchName -SwitchType Internal | Out-Null
+            Write-Host "Created switch: $switchName (Internal - No internet)" -ForegroundColor Yellow
+        }
+    } else {
+        $switchName = "Internal-Switch"
+        New-VMSwitch -Name $switchName -SwitchType Internal | Out-Null
+        Write-Host "Created switch: $switchName (Internal - No internet)" -ForegroundColor Yellow
+    }
 }
 
 # VM configurations

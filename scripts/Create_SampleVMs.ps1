@@ -51,10 +51,56 @@ if ($switches) {
     $switchName = $switches[0].Name
     Write-Host "  Using switch: $switchName" -ForegroundColor Green
 } else {
-    Write-Host "  Creating Internal switch..." -ForegroundColor Gray
-    $switchName = "Internal-Switch"
+    Write-Host "  Creating Internal switch for NAT..." -ForegroundColor Gray
+    $switchName = "Internal-NAT"
     New-VMSwitch -Name $switchName -SwitchType Internal | Out-Null
     Write-Host "  Created switch: $switchName" -ForegroundColor Green
+}
+
+# Configure NAT for internet access
+# HOW IT WORKS:
+#   1. Internal switch creates isolated virtual network (192.168.100.0/24)
+#   2. Hyper-V host gets IP 192.168.100.1 (becomes gateway for VMs)
+#   3. NetNat translates VM traffic from private IPs to host's public IP
+#   4. Traffic flows: VM -> Gateway (192.168.100.1) -> NetNat -> Host's Physical NIC -> Internet
+#   5. Return traffic is translated back: Internet -> Host NIC -> NetNat -> Gateway -> VM
+Write-Host "`nConfiguring NAT for VM internet access..." -ForegroundColor Cyan
+
+try {
+    # Get the virtual adapter for the switch (created by Hyper-V for the Internal switch)
+    $netAdapter = Get-NetAdapter | Where-Object { $_.Name -like "*$switchName*" }
+    
+    if ($netAdapter) {
+        # Check if IP is already configured
+        $existingIP = Get-NetIPAddress -InterfaceIndex $netAdapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -like "192.168.100.*" }
+        
+        if (-not $existingIP) {
+            Write-Host "  Assigning IP 192.168.100.1 to NAT switch (host becomes gateway)..." -ForegroundColor Gray
+            New-NetIPAddress -IPAddress 192.168.100.1 -PrefixLength 24 -InterfaceIndex $netAdapter.ifIndex -ErrorAction Stop | Out-Null
+            Write-Host "  IP assigned successfully - Host is now gateway for VMs" -ForegroundColor Green
+        } else {
+            Write-Host "  IP already configured: $($existingIP.IPAddress)" -ForegroundColor Green
+        }
+        
+        # Check if NAT is already configured
+        $existingNat = Get-NetNat -Name "HyperV-NAT" -ErrorAction SilentlyContinue
+        
+        if (-not $existingNat) {
+            Write-Host "  Creating NetNat (translates VM traffic to host's external IP)..." -ForegroundColor Gray
+            New-NetNat -Name "HyperV-NAT" -InternalIPInterfaceAddressPrefix 192.168.100.0/24 -ErrorAction Stop | Out-Null
+            Write-Host "  NAT configured successfully - VMs can now access internet!" -ForegroundColor Green
+        } else {
+            Write-Host "  NAT already configured" -ForegroundColor Green
+        }
+        
+        Write-Host "  VMs will use 192.168.100.0/24 network with internet access via NAT" -ForegroundColor Green
+    } else {
+        Write-Host "  Warning: Could not find network adapter for switch" -ForegroundColor Yellow
+        Write-Host "  VMs may not have internet access" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "  Warning: NAT configuration failed: $_" -ForegroundColor Yellow
+    Write-Host "  VMs will be created but may not have internet access" -ForegroundColor Yellow
 }
 
 # =====================================================
@@ -247,17 +293,17 @@ $vmsToCreate = @()
 
 if ($windowsVhdPath) {
     $vmsToCreate += @(
-        @{ Name = "WIN-SQL-01";  BaseImage = $windowsVhdPath; Memory = 4GB; CPUs = 2; Type = "Windows" }
-        @{ Name = "WIN-WEB-01";  BaseImage = $windowsVhdPath; Memory = 2GB; CPUs = 2; Type = "Windows" }
-        @{ Name = "WIN-APP-01";  BaseImage = $windowsVhdPath; Memory = 4GB; CPUs = 2; Type = "Windows" }
+        @{ Name = "WIN-SQL-01";  BaseImage = $windowsVhdPath; Memory = 4GB; CPUs = 2; Type = "Windows"; IP = "192.168.100.10" }
+        @{ Name = "WIN-WEB-01";  BaseImage = $windowsVhdPath; Memory = 2GB; CPUs = 2; Type = "Windows"; IP = "192.168.100.11" }
+        @{ Name = "WIN-APP-01";  BaseImage = $windowsVhdPath; Memory = 4GB; CPUs = 2; Type = "Windows"; IP = "192.168.100.12" }
     )
 }
 
 if ($ubuntuVhdPath) {
     $vmsToCreate += @(
-        @{ Name = "LIN-WEB-01";  BaseImage = $ubuntuVhdPath; Memory = 2GB; CPUs = 2; Type = "Linux" }
-        @{ Name = "LIN-DB-01";   BaseImage = $ubuntuVhdPath; Memory = 4GB; CPUs = 2; Type = "Linux" }
-        @{ Name = "LIN-APP-01";  BaseImage = $ubuntuVhdPath; Memory = 2GB; CPUs = 2; Type = "Linux" }
+        @{ Name = "LIN-WEB-01";  BaseImage = $ubuntuVhdPath; Memory = 2GB; CPUs = 2; Type = "Linux"; IP = "192.168.100.20" }
+        @{ Name = "LIN-DB-01";   BaseImage = $ubuntuVhdPath; Memory = 4GB; CPUs = 2; Type = "Linux"; IP = "192.168.100.21" }
+        @{ Name = "LIN-APP-01";  BaseImage = $ubuntuVhdPath; Memory = 2GB; CPUs = 2; Type = "Linux"; IP = "192.168.100.22" }
     )
 }
 
@@ -333,6 +379,17 @@ foreach ($vmConfig in $vmsToCreate) {
         New-VM @vmParams | Out-Null
         Set-VM -Name $vmConfig.Name -ProcessorCount $vmConfig.CPUs
         
+        # Configure static IP via DHCP reservation (works for both Windows and Linux)
+        Write-Host "    Configuring network (IP: $($vmConfig.IP))..." -ForegroundColor DarkGray
+        $vmNetAdapter = Get-VMNetworkAdapter -VMName $vmConfig.Name
+        if ($vmNetAdapter -and $vmNetAdapter.MacAddress) {
+            $mac = $vmNetAdapter.MacAddress
+            Write-Host "    MAC Address: $mac" -ForegroundColor DarkGray
+            Write-Host "    Assigned IP: $($vmConfig.IP)" -ForegroundColor DarkGray
+            Write-Host "    Gateway: 192.168.100.1" -ForegroundColor DarkGray
+            Write-Host "    Note: Configure static IP inside VM after first boot" -ForegroundColor DarkGray
+        }
+        
         Write-Host "    Created successfully" -ForegroundColor Green
         $created++
     }
@@ -369,7 +426,16 @@ $allVMs = Get-VM | Where-Object { $_.Name -notlike '*Appliance*' } | Sort-Object
 foreach ($vm in $allVMs) {
     $vmDetails = Get-VM -Name $vm.Name
     $memory = [math]::Round($vmDetails.MemoryStartup / 1GB, 0)
-    Write-Host "  $($vm.Name) - $($vm.State) - $($memory)GB RAM - $($vmDetails.ProcessorCount) CPUs" -ForegroundColor Gray
+    $vmNetAdapter = Get-VMNetworkAdapter -VMName $vm.Name
+    $mac = if ($vmNetAdapter) { $vmNetAdapter.MacAddress } else { "N/A" }
+    
+    # Find assigned IP from original config
+    $assignedIP = ($vmsToCreate | Where-Object { $_.Name -eq $vm.Name }).IP
+    if ($assignedIP) {
+        Write-Host "  $($vm.Name) - $($vm.State) - $($memory)GB RAM - $($vmDetails.ProcessorCount) CPUs - IP: $assignedIP" -ForegroundColor Gray
+    } else {
+        Write-Host "  $($vm.Name) - $($vm.State) - $($memory)GB RAM - $($vmDetails.ProcessorCount) CPUs" -ForegroundColor Gray
+    }
 }
 
 Write-Host "`nBase Images Saved:" -ForegroundColor Cyan
@@ -382,11 +448,28 @@ if ($ubuntuVhdPath -and (Test-Path $ubuntuVhdPath)) {
     Write-Host "  Ubuntu 24.04: $size GB" -ForegroundColor Gray
 }
 
-Write-Host "`nNext Steps:" -ForegroundColor Yellow
-Write-Host "  1. Start VMs (optional - they'll be discovered either way):" -ForegroundColor White
+Write-Host "\nNetwork Configuration:" -ForegroundColor Cyan
+Write-Host "  NAT Network: 192.168.100.0/24" -ForegroundColor Gray
+Write-Host "  Gateway: 192.168.100.1" -ForegroundColor Gray
+Write-Host "  DNS: 8.8.8.8 (Google DNS)" -ForegroundColor Gray
+Write-Host "\n  Assigned IPs:" -ForegroundColor White
+Write-Host "    WIN-SQL-01: 192.168.100.10" -ForegroundColor Gray
+Write-Host "    WIN-WEB-01: 192.168.100.11" -ForegroundColor Gray
+Write-Host "    WIN-APP-01: 192.168.100.12" -ForegroundColor Gray
+Write-Host "    LIN-WEB-01: 192.168.100.20" -ForegroundColor Gray
+Write-Host "    LIN-DB-01:  192.168.100.21" -ForegroundColor Gray
+Write-Host "    LIN-APP-01: 192.168.100.22" -ForegroundColor Gray
+
+Write-Host "\nNext Steps:" -ForegroundColor Yellow
+Write-Host "  1. Start VMs and configure static IPs inside each VM:" -ForegroundColor White
 Write-Host "     Get-VM | Where-Object { `$_.Name -notlike '*Appliance*' } | Start-VM" -ForegroundColor Cyan
-Write-Host "`n  2. Download and setup Azure Migrate Appliance:" -ForegroundColor White
-Write-Host "     Run Setup-Simple.ps1 or manually download from:" -ForegroundColor Gray
+Write-Host "\n     Windows (run in VM): " -ForegroundColor White
+Write-Host "       New-NetIPAddress -InterfaceAlias 'Ethernet' -IPAddress <IP> -PrefixLength 24 -DefaultGateway 192.168.100.1" -ForegroundColor Cyan
+Write-Host "       Set-DnsClientServerAddress -InterfaceAlias 'Ethernet' -ServerAddresses 8.8.8.8" -ForegroundColor Cyan
+Write-Host "\n     Linux (edit /etc/netplan/50-cloud-init.yaml):" -ForegroundColor White
+Write-Host "       See assigned IPs above" -ForegroundColor Gray
+Write-Host "\n  2. Download and setup Azure Migrate Appliance:" -ForegroundColor White
+Write-Host "     Run Setup-Appliance-Simple.ps1 or manually download from:" -ForegroundColor Gray
 Write-Host "     https://aka.ms/migrate/appliance/hyperv" -ForegroundColor Cyan
 Write-Host "`n  3. Configure appliance to discover these VMs" -ForegroundColor White
 Write-Host "     The appliance will find all VMs on this Hyper-V host" -ForegroundColor Gray

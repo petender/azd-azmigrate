@@ -88,24 +88,46 @@ azd provision
 **Time:** Instant (automated during deployment)  
 **Use Case:** Quick POC, high-level capacity planning
 
-### Scenario 2: Appliance Discovery (Mostly Automated 🚀)
+### Scenario 2: Appliance Discovery (Semi-Automated 🚀)
 
-**No prerequisites required!** During `azd provision`:
+**After infrastructure deployment**, complete the on-premises setup:
 
-**What Gets Automated:**
-✅ Downloads Azure Migrate appliance VHD (~10 GB)  
-✅ Transfers to Hyper-V host  
-✅ Creates appliance VM (8 vCPU, 16 GB RAM)  
-✅ Creates 6 sample VMs for discovery
+**Step 1: Copy Scripts to Hyper-V Host (2 minutes)**
 
-**Manual Steps (5-10 minutes):**
-1. Start appliance VM
-2. Complete configuration wizard (browser-based)
-3. Register with Azure Migrate project
-4. Add Hyper-V host credentials
-5. Start discovery
+Connect to Hyper-V host via Azure Bastion, then copy:
+- `scripts/CreateActualVMs.ps1`
+- `scripts/Create_AzureMigrateAppliance.ps1`
 
-**Time:** 30-45 minutes total (20 min automated + 10 min manual)  
+**Step 2: Create Sample VMs (30-45 minutes)**
+
+Run on Hyper-V host:
+```powershell
+.\CreateActualVMs.ps1
+```
+
+✅ Downloads real OS images (Windows Server 2022 & Ubuntu 24.04)  
+✅ Creates 6 bootable VMs ready for discovery  
+✅ Progress bars and automatic retry on failures
+
+**Step 3: Import Appliance (30-45 minutes)**
+
+Run on Hyper-V host:
+```powershell
+.\Create_AzureMigrateAppliance.ps1
+```
+
+✅ Downloads official appliance from Microsoft (~12GB)  
+✅ Imports VM with compatibility fixes  
+✅ Connects to network switch automatically
+
+**Step 4: Configure Discovery (10 minutes)**
+1. Start appliance: `Start-VM -Name AzureMigrateAppliance`
+2. Connect via Hyper-V Manager
+3. Browser: https://localhost:44368
+4. Register with Azure Migrate project
+5. Add Hyper-V credentials and start discovery
+
+**Total Time:** ~1.5-2 hours (mostly automated downloads)  
 **Use Case:** Production migrations, dependency mapping, performance-based sizing
 
 ---

@@ -196,7 +196,8 @@ resource hypervSetupExtension 'Microsoft.Compute/virtualMachines/extensions@2023
     type: 'CustomScriptExtension'
     typeHandlerVersion: '1.10'
     autoUpgradeMinorVersion: true
-    settings: {
+    settings: {}
+    protectedSettings: {
       commandToExecute: 'powershell -ExecutionPolicy Unrestricted -Command "try { Install-WindowsFeature -Name Hyper-V -IncludeManagementTools; $disk = Get-Disk | Where-Object PartitionStyle -eq \'RAW\' | Select-Object -First 1; if ($disk) { $disk | Initialize-Disk -PartitionStyle GPT -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume -FileSystem NTFS -NewFileSystemLabel \'VMs\' -Confirm:$false; Start-Sleep -Seconds 5; $volume = Get-Volume | Where-Object FileSystemLabel -eq \'VMs\'; $driveLetter = $volume.DriveLetter; if ($driveLetter) { New-Item -Path ($driveLetter + \':\\VMs\') -ItemType Directory -Force; New-Item -Path ($driveLetter + \':\\ISOs\') -ItemType Directory -Force; Set-VMHost -VirtualHardDiskPath ($driveLetter + \':\\VMs\') -VirtualMachinePath ($driveLetter + \':\\VMs\') -ErrorAction SilentlyContinue } }; exit 0 } catch { exit 0 }"'
     }
   }

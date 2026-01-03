@@ -469,3 +469,12 @@ This is a demonstration project designed to showcase Azure Migrate capabilities.
 - **Windows VMs:** Username: `Administrator`, Password: `P@ssw0rd!123`
 - **Network:** 192.168.100.0/24 (Internal NAT)
 
+## Ultimate Future scenario requested
+
+When talking about and showing this scenario to other trainers, some asked why they have to go through some manual PowerShell scripting steps. Well, for the following reason:
+
+- This could be used as an Azure VM demo environment, without focusing on Hyper-V, so no need for Guest VMs;
+- The guestVM creation takes up a serious amount of time (downloading VHD resources being the biggest part), which
+conflicts with Azure Resource Manager time-outs; this would potentially break the Azure deployment
+- Not everything needs to be 100% automated;
+- Flexibility to tweak and tune the Guest VM setup for your own needs and wants; 

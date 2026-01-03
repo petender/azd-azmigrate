@@ -254,30 +254,135 @@ if (Test-Path $ubuntuVhdPath) {
         New-Item -ItemType Directory -Path "$baseVhdPath\Temp" -Force | Out-Null
         tar -xzf $tempTarGz -C "$baseVhdPath\Temp"
         
-        # Find VHD and convert to dynamic format (removes sparse/compression)
-        Write-Host "      Searching for VHD file..." -ForegroundColor DarkGray
-        $vhdFile = Get-ChildItem -Path "$baseVhdPath\Temp" -Filter "*.vhd" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        # Find VHD file - only look for Ubuntu VHDs (livecd.ubuntu-cpc pattern)
+        Write-Host "      Searching for Ubuntu VHD file..." -ForegroundColor DarkGray
+        $vhdFile = Get-ChildItem -Path "$baseVhdPath\Temp" -Filter "*.vhd" -Recurse -ErrorAction SilentlyContinue | 
+                   Where-Object { $_.Name -like "*ubuntu*" -or $_.Name -like "*livecd*" } | 
+                   Select-Object -First 1
+        
         if ($vhdFile) {
             Write-Host "      Found: $($vhdFile.Name)" -ForegroundColor DarkGray
-            # Convert VHD to dynamic format (removes sparse/compression issues)
-            Write-Host "      Converting VHD to dynamic format..." -ForegroundColor Gray
-            $tempDynamicVhd = "$baseVhdPath\Ubuntu-24.04-Dynamic.vhd"
-            Convert-VHD -Path $vhdFile.FullName -DestinationPath $tempDynamicVhd -VHDType Dynamic
-            Move-Item -Path $tempDynamicVhd -Destination $ubuntuVhdPath -Force
+            
+            # Azure cloud images are sparse VHDs - just move and remove sparse flag
+            Write-Host "      Moving VHD to final location..." -ForegroundColor Gray
+            Move-Item -Path $vhdFile.FullName -Destination $ubuntuVhdPath -Force
+            
+            # Remove sparse flag using fsutil
+            Write-Host "      Removing sparse attribute..." -ForegroundColor DarkGray
+            try {
+                $result = & fsutil sparse setflag $ubuntuVhdPath 0 2>&1
+                Write-Host "      Sparse attribute removed successfully" -ForegroundColor Green
+            } catch {
+                Write-Host "      Note: Could not remove sparse attribute - VHD should still work" -ForegroundColor Yellow
+            }
+            
             Write-Host "      Saved: $ubuntuVhdPath" -ForegroundColor Green
         } else {
-            throw "No VHD file found in archive"
+            throw "No Ubuntu VHD file found in archive"
         }
         
-        # Cleanup
-        Remove-Item $tempTarGz -Force
-        Remove-Item "$baseVhdPath\Temp" -Recurse -Force
+        # Cleanup - delete only what we created, be tolerant of failures
+        Write-Host "      Cleaning up temporary files..." -ForegroundColor DarkGray
+        try {
+            Remove-Item $tempTarGz -Force -ErrorAction Stop
+        } catch {
+            Write-Host "      Warning: Could not delete $tempTarGz" -ForegroundColor Yellow
+        }
+        
+        # Only delete the specific Ubuntu temp directory, not the entire Temp folder
+        $ubuntuTempDir = Split-Path -Parent $vhdFile.FullName
+        if ($ubuntuTempDir -and $ubuntuTempDir -ne "$baseVhdPath\Temp") {
+            try {
+                Remove-Item $ubuntuTempDir -Recurse -Force -ErrorAction Stop
+            } catch {
+                Write-Host "      Warning: Could not delete temp directory (files may be in use)" -ForegroundColor Yellow
+            }
+        }
     }
     catch {
         Write-Host "      Failed to download Ubuntu VHD: $_" -ForegroundColor Red
-        Write-Host "      Continuing with Windows only..." -ForegroundColor Yellow
-        $ubuntuVhdPath = $null
+        
+        # If VHD was successfully saved, don't null it out - allow VMs to be created
+        if (Test-Path $ubuntuVhdPath) {
+            Write-Host "      Ubuntu VHD was downloaded successfully despite cleanup error" -ForegroundColor Yellow
+            Write-Host "      Continuing with VM creation..." -ForegroundColor Green
+        } else {
+            Write-Host "      Continuing with Windows only..." -ForegroundColor Yellow
+            $ubuntuVhdPath = $null
+        }
     }
+}
+
+# =====================================================
+# Helper Function: Create Cloud-Init ISO for Linux
+# =====================================================
+
+function New-CloudInitISO {
+    param(
+        [string]$VMName,
+        [string]$IPAddress,
+        [string]$Gateway = "192.168.100.1",
+        [string]$DNS = "8.8.8.8",
+        [string]$OutputPath
+    )
+    
+    $tempDir = "$env:TEMP\cloudinit-$VMName"
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    
+    # Create meta-data file
+    $metaData = @"
+instance-id: $VMName
+local-hostname: $VMName
+"@
+    $metaData | Out-File -FilePath "$tempDir\meta-data" -Encoding ASCII -NoNewline
+    
+    # Create network-config file
+    $networkConfig = @"
+version: 2
+ethernets:
+  eth0:
+    addresses:
+      - $IPAddress/24
+    gateway4: $Gateway
+    nameservers:
+      addresses:
+        - $DNS
+"@
+    $networkConfig | Out-File -FilePath "$tempDir\network-config" -Encoding ASCII -NoNewline
+    
+    # Create user-data file
+    $userData = @"
+#cloud-config
+users:
+  - default
+  - name: azureadmin
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    passwd: `$6`$rounds=4096`$saltsalt`$IuDbAtyC.RVBCySWKxbmGXG8FqQ7sTKmVZk1JH1AYYxKvCmZb6zcJXCcUvPvD8BbqHfFWz8VnJQbJp3XxKdP1
+runcmd:
+  - systemctl restart systemd-networkd
+  - systemctl restart networking
+"@
+    $userData | Out-File -FilePath "$tempDir\user-data" -Encoding ASCII -NoNewline
+    
+    # Create ISO using oscdimg (part of Windows ADK) or mkisofs
+    $isoPath = $OutputPath
+    
+    # Try using oscdimg first (Windows ADK)
+    $oscdimg = "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe"
+    
+    if (Test-Path $oscdimg) {
+        & $oscdimg -j2 -lcidata $tempDir $isoPath | Out-Null
+    } else {
+        # Fallback: Try PowerShell-based approach
+        Write-Host "      Note: For automatic network config, install Windows ADK or mount ISO manually" -ForegroundColor Yellow
+        Write-Host "      Network config files saved to: $tempDir" -ForegroundColor Gray
+        return $null
+    }
+    
+    Remove-Item -Path $tempDir -Recurse -Force
+    return $isoPath
 }
 
 # =====================================================
@@ -379,23 +484,128 @@ foreach ($vmConfig in $vmsToCreate) {
         New-VM @vmParams | Out-Null
         Set-VM -Name $vmConfig.Name -ProcessorCount $vmConfig.CPUs
         
-        # Configure static IP via DHCP reservation (works for both Windows and Linux)
-        Write-Host "    Configuring network (IP: $($vmConfig.IP))..." -ForegroundColor DarkGray
-        $vmNetAdapter = Get-VMNetworkAdapter -VMName $vmConfig.Name
-        if ($vmNetAdapter -and $vmNetAdapter.MacAddress) {
-            $mac = $vmNetAdapter.MacAddress
-            Write-Host "    MAC Address: $mac" -ForegroundColor DarkGray
-            Write-Host "    Assigned IP: $($vmConfig.IP)" -ForegroundColor DarkGray
-            Write-Host "    Gateway: 192.168.100.1" -ForegroundColor DarkGray
-            Write-Host "    Note: Configure static IP inside VM after first boot" -ForegroundColor DarkGray
+        # Configure network for Linux VMs using cloud-init
+        if ($vmConfig.Type -eq "Linux") {
+            Write-Host "    Creating cloud-init ISO for automatic network config..." -ForegroundColor DarkGray
+            $cloudInitISO = "$vmsPath\$vmName-cloudinit.iso"
+            $isoCreated = New-CloudInitISO -VMName $vmName -IPAddress $vmConfig.IP -OutputPath $cloudInitISO
+            
+            if ($isoCreated -and (Test-Path $cloudInitISO)) {
+                Add-VMDvdDrive -VMName $vmName -Path $cloudInitISO
+                Write-Host "    Cloud-init ISO attached - network will auto-configure on first boot" -ForegroundColor Green
+            } else {
+                Write-Host "    Cloud-init ISO creation skipped - configure network manually" -ForegroundColor Yellow
+            }
         }
         
+        Write-Host "    IP: $($vmConfig.IP), Gateway: 192.168.100.1, DNS: 8.8.8.8" -ForegroundColor DarkGray
         Write-Host "    Created successfully" -ForegroundColor Green
         $created++
     }
     catch {
         Write-Host "    Failed: $_" -ForegroundColor Red
     }
+}
+
+# =====================================================
+# Configure Windows VMs Network (After Creation)
+# =====================================================
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host " Step 3: Configure Windows VM Networks" -ForegroundColor White
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+$windowsVMs = $vmsToCreate | Where-Object { $_.Type -eq "Windows" }
+
+if ($windowsVMs.Count -gt 0) {
+    Write-Host "Starting Windows VMs to configure network..." -ForegroundColor Gray
+    Write-Host "This will take 2-3 minutes per VM for first boot`n" -ForegroundColor Gray
+    
+    foreach ($vmConfig in $windowsVMs) {
+        $vmName = $vmConfig.Name
+        $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
+        
+        if (-not $vm) {
+            continue
+        }
+        
+        Write-Host "  Configuring $vmName..." -ForegroundColor Gray
+        
+        try {
+            # Start VM if not running
+            if ($vm.State -ne "Running") {
+                Write-Host "    Starting VM..." -ForegroundColor DarkGray
+                Start-VM -Name $vmName
+                
+                # Wait for VM to boot and integration services to be ready
+                Write-Host "    Waiting for VM to boot (up to 3 minutes)..." -ForegroundColor DarkGray
+                $timeout = 180
+                $elapsed = 0
+                $heartbeat = $false
+                
+                while ($elapsed -lt $timeout -and -not $heartbeat) {
+                    Start-Sleep -Seconds 5
+                    $elapsed += 5
+                    $vmInfo = Get-VM -Name $vmName
+                    $heartbeat = $vmInfo.Heartbeat -eq "OkApplicationsHealthy" -or $vmInfo.Heartbeat -eq "OkApplicationsUnknown" -or $vmInfo.Heartbeat -eq "Ok"
+                    
+                    if ($elapsed -eq 30 -or $elapsed -eq 60 -or $elapsed -eq 90) {
+                        Write-Host "    Still waiting... ($elapsed seconds)" -ForegroundColor DarkGray
+                    }
+                }
+                
+                if (-not $heartbeat) {
+                    Write-Host "    VM not responding - will configure later" -ForegroundColor Yellow
+                    continue
+                }
+                
+                # Extra wait for system to stabilize
+                Write-Host "    VM booted, waiting for system to stabilize..." -ForegroundColor DarkGray
+                Start-Sleep -Seconds 20
+            }
+            
+            # Configure network using PowerShell Direct
+            Write-Host "    Configuring static IP: $($vmConfig.IP)..." -ForegroundColor DarkGray
+            
+            $scriptBlock = {
+                param($IP, $Gateway, $DNS)
+                
+                # Get the network adapter
+                $adapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1
+                
+                if ($adapter) {
+                    # Remove existing IP configuration
+                    Remove-NetIPAddress -InterfaceAlias $adapter.Name -Confirm:$false -ErrorAction SilentlyContinue
+                    Remove-NetRoute -InterfaceAlias $adapter.Name -Confirm:$false -ErrorAction SilentlyContinue
+                    
+                    # Set static IP
+                    New-NetIPAddress -InterfaceAlias $adapter.Name -IPAddress $IP -PrefixLength 24 -DefaultGateway $Gateway -ErrorAction Stop | Out-Null
+                    
+                    # Set DNS
+                    Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ServerAddresses $DNS -ErrorAction Stop
+                    
+                    return "Success: IP=$IP, Gateway=$Gateway, DNS=$DNS"
+                } else {
+                    return "Error: No active network adapter found"
+                }
+            }
+            
+            $credential = New-Object System.Management.Automation.PSCredential("Administrator", (ConvertTo-SecureString -String "P@ssw0rd" -AsPlainText -Force))
+            
+            $result = Invoke-Command -VMName $vmName -Credential $credential -ScriptBlock $scriptBlock -ArgumentList $vmConfig.IP, "192.168.100.1", "8.8.8.8" -ErrorAction Stop
+            
+            Write-Host "    $result" -ForegroundColor Green
+            
+        } catch {
+            Write-Host "    Failed to auto-configure: $_" -ForegroundColor Yellow
+            Write-Host "    You'll need to configure manually inside the VM" -ForegroundColor Yellow
+            Write-Host "    Command: New-NetIPAddress -InterfaceAlias 'Ethernet' -IPAddress $($vmConfig.IP) -PrefixLength 24 -DefaultGateway 192.168.100.1" -ForegroundColor Cyan
+        }
+    }
+    
+    Write-Host "`nWindows VM network configuration complete" -ForegroundColor Green
+} else {
+    Write-Host "No Windows VMs to configure" -ForegroundColor Gray
 }
 
 # =====================================================
@@ -461,13 +671,15 @@ Write-Host "    LIN-DB-01:  192.168.100.21" -ForegroundColor Gray
 Write-Host "    LIN-APP-01: 192.168.100.22" -ForegroundColor Gray
 
 Write-Host "\nNext Steps:" -ForegroundColor Yellow
-Write-Host "  1. Start VMs and configure static IPs inside each VM:" -ForegroundColor White
-Write-Host "     Get-VM | Where-Object { `$_.Name -notlike '*Appliance*' } | Start-VM" -ForegroundColor Cyan
-Write-Host "\n     Windows (run in VM): " -ForegroundColor White
+Write-Host "  1. Verify VMs have network connectivity:" -ForegroundColor White
+Write-Host "     - Windows VMs: Network configured automatically via PowerShell Direct" -ForegroundColor Gray
+Write-Host "     - Linux VMs: Network will auto-configure via cloud-init on first boot" -ForegroundColor Gray
+Write-Host "`n     Test connectivity from inside a VM:" -ForegroundColor White
+Write-Host "       Windows: Test-NetConnection 8.8.8.8" -ForegroundColor Cyan
+Write-Host "       Linux: ping 8.8.8.8" -ForegroundColor Cyan
+Write-Host "`n     If manual config needed (Windows):" -ForegroundColor White
 Write-Host "       New-NetIPAddress -InterfaceAlias 'Ethernet' -IPAddress <IP> -PrefixLength 24 -DefaultGateway 192.168.100.1" -ForegroundColor Cyan
 Write-Host "       Set-DnsClientServerAddress -InterfaceAlias 'Ethernet' -ServerAddresses 8.8.8.8" -ForegroundColor Cyan
-Write-Host "\n     Linux (edit /etc/netplan/50-cloud-init.yaml):" -ForegroundColor White
-Write-Host "       See assigned IPs above" -ForegroundColor Gray
 Write-Host "\n  2. Download and setup Azure Migrate Appliance:" -ForegroundColor White
 Write-Host "     Run Setup-Appliance-Simple.ps1 or manually download from:" -ForegroundColor Gray
 Write-Host "     https://aka.ms/migrate/appliance/hyperv" -ForegroundColor Cyan

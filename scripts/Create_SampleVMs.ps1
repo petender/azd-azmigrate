@@ -144,6 +144,11 @@ $UnattendXmlTemplate = @"
       <UILanguage>en-US</UILanguage>
       <UserLocale>en-US</UserLocale>
     </component>
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+      </UserData>
+    </component>
   </settings>
   <settings pass="specialize">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
@@ -157,8 +162,14 @@ $UnattendXmlTemplate = @"
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
       <OOBE>
         <HideEULAPage>true</HideEULAPage>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
         <NetworkLocation>Work</NetworkLocation>
-        <ProtectYourPC>1</ProtectYourPC>
+        <ProtectYourPC>3</ProtectYourPC>
+        <SkipUserOOBE>true</SkipUserOOBE>
+        <SkipMachineOOBE>true</SkipMachineOOBE>
       </OOBE>
       <UserAccounts>
         <AdministratorPassword>
@@ -182,12 +193,10 @@ $UnattendXmlTemplate = @"
 
 $SetupCompleteCmdTemplate = @"
 @echo off
-REM SetupComplete.cmd — runs after specialize phase finishes.
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  " \$nic = (Get-NetAdapter | Where-Object { \$_.Status -eq 'Up' } | Select-Object -First 1).InterfaceAlias; ^
-    if (-not \$nic) { \$nic = 'Ethernet' }; ^
-    New-NetIPAddress -InterfaceAlias \$nic -IPAddress '{{IPAddress}}' -PrefixLength {{PrefixLength}} -DefaultGateway '{{Gateway}}'; ^
-    Set-DnsClientServerAddress -InterfaceAlias \$nic -ServerAddresses {{DnsArray}} "
+REM SetupComplete.cmd - Runs automatically after Windows setup completes
+echo Configuring network settings...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& { \$nic = (Get-NetAdapter | Where-Object { \$_.Status -eq 'Up' } | Select-Object -First 1).InterfaceAlias; if (-not \$nic) { \$nic = 'Ethernet' }; Remove-NetIPAddress -InterfaceAlias \$nic -Confirm:\$false -ErrorAction SilentlyContinue; Remove-NetRoute -InterfaceAlias \$nic -Confirm:\$false -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; New-NetIPAddress -InterfaceAlias \$nic -IPAddress '{{IPAddress}}' -PrefixLength {{PrefixLength}} -DefaultGateway '{{Gateway}}'; Set-DnsClientServerAddress -InterfaceAlias \$nic -ServerAddresses {{DnsArray}}; Get-NetIPAddress | Out-File C:\Windows\Temp\network-config.log }"
+echo Network configuration complete.
 exit /b 0
 "@
 
@@ -236,6 +245,7 @@ foreach ($spec in $vmSpecs) {
     New-Item -ItemType Directory -Force -Path $panther      | Out-Null
     New-Item -ItemType Directory -Force -Path $setupScripts | Out-Null
 
+    # Generate unattend.xml with only ComputerName and AdminPassword
     $unattend = $UnattendXmlTemplate.Replace("{{ComputerName}}", $spec.ComputerName).
                                      Replace("{{AdminPassword}}", $spec.AdminPassword)
     Set-Content -Path (Join-Path $panther "unattend.xml") -Value $unattend -Encoding UTF8
@@ -243,6 +253,7 @@ foreach ($spec in $vmSpecs) {
     Copy-Item (Join-Path $panther "unattend.xml") (Join-Path $drive "Windows\System32\Sysprep\unattend.xml") -Force
 
     Write-Progress -Id $activityId -Activity "Preparing $($spec.VMName)" -Status "Injecting SetupComplete.cmd" -PercentComplete 65
+    # Generate SetupComplete.cmd with network configuration
     $dnsArrayStr = ($spec.DnsServers | ForEach-Object { "'$_'" }) -join ','
     $setupCmd = $SetupCompleteCmdTemplate.Replace("{{IPAddress}}",    $spec.IPAddress).
                                           Replace("{{PrefixLength}}", $spec.PrefixLength.ToString()).

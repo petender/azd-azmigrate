@@ -221,6 +221,7 @@ resource migrateProject 'Microsoft.Migrate/migrateProjects@2020-06-01-preview' =
   tags: tags
   properties: {
     publicNetworkAccess: 'Enabled'
+    utilityStorageAccountId: storageAccount.id
   }
 }
 

@@ -4,7 +4,7 @@ Complete end-to-end demonstration environment for Azure Migrate with semi-automa
 
 ## 📖 Overview
 
-This project deploys a **fully automated Azure Migrate demonstration** that simulates an on-premises datacenter using nested Hyper-V virtualization in Azure. It provides everything you need to demonstrate server discovery, assessment, and migration capabilities of Azure Migrate.
+This project deploys a **complete Azure Migrate demonstration** that simulates an on-premises datacenter using nested Hyper-V virtualization in Azure. It provides everything you need to demonstrate server discovery, assessment, and migration capabilities of Azure Migrate. Deployment of the Hyper-V host takes about 15-20 minutes, after which you need to run 2 manual scripts inside the Hyper-V Host to build the on-premises simulation VMs and the AzureMigrateAppliance VM.
 
 ### What You Get
 
@@ -64,18 +64,17 @@ This will deploy:
 4. Enter credentials:
    - Username: `azureadmin`
    - Password: (the password you set during deployment)
+5. From Server Manager, validate **Hyper-V** role is installed. You can also try to open Hyper-V Manager. 
+**Note**: if Hyper-V seems missing, try rebooting the Hyper-V Host, which should fix the delay of installing the server role through DSC.
 
 ### Phase 3: Create Sample VMs on Hyper-V Host (30-45 minutes)
 
 Once connected to the Hyper-V host:
 
-```powershell
-# 1. Copy the script from this repo to the Hyper-V host C:\Temp or other folder of choice
-# Location: scripts/Create_SampleVMs.ps1
-# Use Bastion file upload or copy-paste via RDP clipboard
+1. Download this demo scenario's GitHub repo to the Hyper-V Host, and extract the zip. Navigate to the \scripts folder
+2. Run the script (as Administrator)
 
-# 2. Run the script (as Administrator)
-cd C:\Temp (or other folder of choice)
+```powershell
 .\Create_SampleVMs.ps1
 ```
 
@@ -87,11 +86,11 @@ cd C:\Temp (or other folder of choice)
   - **WIN-WEB-01** (192.168.100.11) - 2GB RAM, 2 vCPU  
   - **WIN-APP-01** (192.168.100.12) - 4GB RAM, 2 vCPU
 - Skips OOBE (Out-of-Box Experience) automatically
-- Configures Administrator account with password: `P@ssw0rd!123`
+- Configures Administrator account with password: `**P@ssw0rd!123**` (can be changed upfront in the PS1 file if you want to choose another password)
 - Sets static IP addresses automatically
 - Creates Internal NAT network (192.168.100.0/24) with internet access
 
-**Note: The VMs are just Windows OS, no applications. The naming just looks cool**
+**Note: The VMs are just Windows OS, no applications. The naming just looks cool to simulate a complex app**
 
 **Script Features:**
 
@@ -100,18 +99,16 @@ cd C:\Temp (or other folder of choice)
 - ✅ Detailed logging to `C:\Temp\Create_SampleVMs_verbose.log`
 - ✅ VMs boot directly to desktop with pre-configured network
 
-**Time:** 30-45 minutes (mainly downloading Windows Server VHD)
+**Time:** 30-45 minutes (mainly downloading Windows Server VHD taking most of the time here)
 
 ### Phase 4: Deploy Azure Migrate Appliance (30-45 minutes)
 
 Still on the Hyper-V host:
 
-```powershell
-# 1. Copy the appliance deployment script
-# Location: scripts/Create_AzureMigrateAppliance.ps1
+1. Copy the appliance deployment script
 
 # 2. Run the script (as Administrator)
-cd C:\Temp
+```powershell
 .\Create_AzureMigrateAppliance.ps1
 ```
 
@@ -122,40 +119,47 @@ cd C:\Temp
 - Connects to the Internal-NAT switch
 - Configures with 8GB RAM and 4 vCPUs
 
-**Time:** 30-45 minutes (mainly downloading appliance)
+**Time:** 30-45 minutes (mainly downloading appliance VHD taking up this time)
 
-### Phase 5: Configure Azure Migrate Appliance (10-15 minutes)
+### Phase 5: Configure Azure Migrate Project
 
-```powershell
-# 1. Start the appliance VM
+1. From the Azure Portal, search for **Azure Migrate** and select your project (migrate-project-%azdenv%)
+
+2. Click the **Start-Discovery** button, selecting Using Appliance / For Azure
+
+3. Select **Yes, with Hyper-V** in the **Are your servers virtualized** question.
+
+4. Generate the project key; your Azure Migrate Appliance needs this key during the registration process later
+
+5. You can skip the download step
+
+### Phase 5b: Configure Azure Migrate Appliance (10-15 minutes)
+
+1. Start the appliance VM if not automatically started
 Start-VM -Name AzureMigrateAppliance
 
-# 2. Wait 2-3 minutes for the appliance to boot
+2. Wait 2-3 minutes for the appliance to boot
 
-# 3. Connect via Hyper-V Manager
-# Right-click the VM → Connect
-```
-
-**Configuration Steps Inside the Appliance:**
-
-1. **Access Appliance Configuration Manager**
-   - Browser opens automatically to: `https://localhost:44368`
-   - Or open Edge and navigate to: `https://localhost:44368`
+3. Connect via Hyper-V Manager
+ Right-click the VM → Connect
+4. Provide Initial appliance credentials of your choice
+5. **Access Appliance Configuration Manager**
+   - open Edge and navigate to: `https://localhost:44368`
    - Accept the certificate warning
 
-2. **Register Appliance**
+6. **Register Appliance**
    - Click "Set up prerequisites"
    - Accept license terms
    - Connect to Azure:
-     - Enter Azure subscription ID
+     - Authenticate with your Azure Admin credentials
      - Select your Azure Migrate project
-     - Generate registration key
+     - Provide the generated registration key
 
 3. **Add Hyper-V Credentials**
    - Click "Manage credentials"
    - Add credentials for Hyper-V host:
      - Username: `azureadmin`
-     - Password: (your deployment password)
+     - Password: (your azd deployment provided password)
      - Domain: Leave blank (local account)
 
 4. **Start Discovery**
@@ -163,12 +167,6 @@ Start-VM -Name AzureMigrateAppliance
    - Enter Hyper-V host IP: `192.168.100.1` (the host's internal NAT IP)
    - Or enter the host's actual IP address
    - Wait 10-15 minutes for initial discovery
-
-**Troubleshooting:**
-
-- If appliance can't reach Hyper-V host, verify network connectivity
-- Ensure Windows Firewall allows WinRM (should be enabled by Hyper-V setup)
-- Check that Hyper-V host has credentials configured
 
 ### Phase 6: Explore & Demonstrate (Ongoing)
 

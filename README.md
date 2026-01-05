@@ -135,14 +135,14 @@ Still on the Hyper-V host:
 
 ### Phase 5b: Configure Azure Migrate Appliance (10-15 minutes)
 
-1. Start the appliance VM if not automatically started
-Start-VM -Name AzureMigrateAppliance
+1. Start the appliance VM 
 
 2. Wait 2-3 minutes for the appliance to boot
 
-3. Connect via Hyper-V Manager
- Right-click the VM → Connect
-4. Provide Initial appliance credentials of your choice
+3. Connect via Hyper-V Manager - Right-click the VM → Connect
+
+4. Accept the initial License Terms and provide the appliance credentials of your choice
+
 5. **Access Appliance Configuration Manager**
    - open Edge and navigate to: `https://localhost:44368`
    - Accept the certificate warning
@@ -150,6 +150,7 @@ Start-VM -Name AzureMigrateAppliance
 6. **Register Appliance**
    - Click "Set up prerequisites"
    - Accept license terms
+   - Wait for any Appliance Updates to get installed and refresh browser 
    - Connect to Azure:
      - Authenticate with your Azure Admin credentials
      - Select your Azure Migrate project

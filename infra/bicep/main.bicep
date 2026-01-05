@@ -151,13 +151,8 @@ module migrateHub './modules/migrate-hub.bicep' = {
   params: {
     location: location
     namingPrefix: namingPrefix
-    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
-    enableDiagnostics: false // Disable to avoid workspace propagation issues
     tags: tags
   }
-  dependsOn: [
-    monitoring
-  ]
 }
 
 // =====================================================
@@ -208,11 +203,8 @@ output resourceGroups object = resourceGroupNames
 @description('Azure Migrate project name')
 output migrateProjectName string = migrateHub.outputs.migrateProjectName
 
-@description('Recovery Services Vault name')
-output recoveryServicesVaultName string = migrateHub.outputs.recoveryServicesVaultName
-
-@description('Key Vault name for migration secrets')
-output keyVaultName string = migrateHub.outputs.keyVaultName
+@description('Azure Migrate project ID')
+output migrateProjectId string = migrateHub.outputs.migrateProjectId
 
 @description('Hub Virtual Network ID')
 output hubVnetId string = networking.outputs.hubVnetId

@@ -36,6 +36,68 @@ if ($confirmation -ne 'Y' -and $confirmation -ne 'y') {
 # Configuration
 # =====================================================
 
+# Network configuration for appliance
+$applianceIP = "192.168.100.50"
+$appliancePrefix = 24
+$applianceGateway = "192.168.100.1"
+$applianceDNS = @("8.8.8.8")
+
+# Network configuration script templates
+$ConfigureNetworkPs1Template = @"
+# ConfigureNetwork.ps1 - Configure static IP after first boot
+`$logFile = "C:\Windows\Temp\network-config.log"
+Start-Transcript -Path `$logFile -Append
+
+try {
+    Write-Host "Starting network configuration..."
+    
+    # Wait a bit for network adapter to be ready
+    Start-Sleep -Seconds 5
+    
+    # Find the active network adapter
+    `$nic = (Get-NetAdapter | Where-Object { `$_.Status -eq 'Up' } | Select-Object -First 1).InterfaceAlias
+    if (-not `$nic) {
+        `$nic = (Get-NetAdapter | Select-Object -First 1).InterfaceAlias
+    }
+    
+    Write-Host "Using network adapter: `$nic"
+    
+    # Remove existing IP configuration
+    Write-Host "Removing existing IP configuration..."
+    Remove-NetIPAddress -InterfaceAlias `$nic -Confirm:`$false -ErrorAction SilentlyContinue
+    Remove-NetRoute -InterfaceAlias `$nic -Confirm:`$false -ErrorAction SilentlyContinue
+    
+    Start-Sleep -Seconds 2
+    
+    # Configure static IP
+    Write-Host "Configuring static IP: {{IPAddress}}/{{PrefixLength}}, Gateway: {{Gateway}}"
+    New-NetIPAddress -InterfaceAlias `$nic -IPAddress '{{IPAddress}}' -PrefixLength {{PrefixLength}} -DefaultGateway '{{Gateway}}' -ErrorAction Stop
+    
+    # Configure DNS
+    Write-Host "Configuring DNS servers: {{DnsArray}}"
+    Set-DnsClientServerAddress -InterfaceAlias `$nic -ServerAddresses {{DnsArray}} -ErrorAction Stop
+    
+    Write-Host "Network configuration completed successfully!"
+    Get-NetIPAddress -InterfaceAlias `$nic | Format-Table
+    Get-DnsClientServerAddress -InterfaceAlias `$nic | Format-Table
+    
+} catch {
+    Write-Host "ERROR: `$(`$_.Exception.Message)"
+    `$_ | Out-File -Append -FilePath `$logFile
+} finally {
+    Stop-Transcript
+}
+"@
+
+$SetupCompleteCmdTemplate = @"
+@echo off
+REM SetupComplete.cmd - Schedule network configuration to run on first logon
+echo Scheduling network configuration for first logon...
+reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\RunOnce" /v ConfigureNetwork /t REG_SZ /d "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Windows\Setup\Scripts\ConfigureNetwork.ps1" /f
+echo Network configuration scheduled.
+exit /b 0
+"@
+
 # Check for virtual switch
 Write-Host "`nChecking for virtual switch..." -ForegroundColor Cyan
 $switches = Get-VMSwitch
@@ -321,6 +383,68 @@ if (-not $skipSetup) {
                 Write-Host "  Network adapter connected to: $switchName" -ForegroundColor Green
             }
             
+            # Inject network configuration scripts
+            Write-Host "  Injecting static IP configuration ($applianceIP)..." -ForegroundColor Yellow
+            try {
+                # Find the appliance VHD
+                $applianceVHD = Get-VMHardDiskDrive -VMName $applianceName | Select-Object -First 1
+                if (-not $applianceVHD) {
+                    Write-Host "    Warning: Could not find appliance VHD" -ForegroundColor Yellow
+                } else {
+                    $vhdPath = $applianceVHD.Path
+                    Write-Host "    Mounting VHD: $vhdPath" -ForegroundColor DarkGray
+                    
+                    # Mount the VHD
+                    Mount-VHD -Path $vhdPath -ErrorAction Stop
+                    Start-Sleep -Seconds 2
+                    
+                    # Find the mounted drive
+                    $disk = Get-Disk | Where-Object { $_.FriendlyName -like "*Virtual Disk*" -and $_.OperationalStatus -eq 'Online' } | Sort-Object Number | Select-Object -Last 1
+                    if (-not $disk) {
+                        throw "Could not find mounted disk"
+                    }
+                    
+                    $partition = Get-Partition -DiskNumber $disk.Number | Where-Object { $_.DriveLetter } | Select-Object -First 1
+                    if (-not $partition) {
+                        throw "Could not find partition with drive letter"
+                    }
+                    
+                    $drive = $partition.DriveLetter + ":"
+                    Write-Host "    Mounted at: $drive" -ForegroundColor DarkGray
+                    
+                    # Create directories for scripts
+                    $setupScripts = Join-Path $drive "Windows\Setup\Scripts"
+                    New-Item -ItemType Directory -Force -Path $setupScripts -ErrorAction SilentlyContinue | Out-Null
+                    
+                    # Generate ConfigureNetwork.ps1 with appliance IP settings
+                    $dnsArrayStr = ($applianceDNS | ForEach-Object { "'$_'" }) -join ','
+                    $configNetPs1 = $ConfigureNetworkPs1Template.Replace("{{IPAddress}}", $applianceIP).
+                                                                  Replace("{{PrefixLength}}", $appliancePrefix.ToString()).
+                                                                  Replace("{{Gateway}}", $applianceGateway).
+                                                                  Replace("{{DnsArray}}", $dnsArrayStr)
+                    
+                    Set-Content -Path (Join-Path $setupScripts "ConfigureNetwork.ps1") -Value $configNetPs1 -Encoding UTF8
+                    Write-Host "    Created ConfigureNetwork.ps1" -ForegroundColor DarkGray
+                    
+                    # Generate SetupComplete.cmd that schedules the network configuration
+                    Set-Content -Path (Join-Path $setupScripts "SetupComplete.cmd") -Value $SetupCompleteCmdTemplate -Encoding ASCII
+                    Write-Host "    Created SetupComplete.cmd" -ForegroundColor DarkGray
+                    
+                    # Dismount the VHD
+                    Start-Sleep -Seconds 1
+                    Dismount-VHD -Path $vhdPath -ErrorAction Stop
+                    Write-Host "    Network configuration injected successfully" -ForegroundColor Green
+                    Write-Host "    Appliance will be configured with IP: $applianceIP on first boot" -ForegroundColor Green
+                }
+            } catch {
+                Write-Host "    Warning: Failed to inject network configuration: $_" -ForegroundColor Yellow
+                Write-Host "    You may need to configure networking manually" -ForegroundColor Yellow
+                # Try to dismount if something went wrong
+                if ($vhdPath -and (Test-Path $vhdPath)) {
+                    Dismount-VHD -Path $vhdPath -ErrorAction SilentlyContinue
+                }
+            }
+            
             # Cleanup extraction folder
             Write-Host "  Cleaning up temporary files..." -ForegroundColor DarkGray
             Start-Sleep -Seconds 2
@@ -367,6 +491,7 @@ $appliance = Get-VM -Name $applianceName -ErrorAction SilentlyContinue
 if ($appliance) {
     $appMemory = [math]::Round($appliance.MemoryStartup / 1GB, 0)
     Write-Host "  $applianceName - $($appliance.State) - $($appMemory)GB RAM" -ForegroundColor Gray
+    Write-Host "  Configured IP: $applianceIP (will be applied on first boot)" -ForegroundColor Gray
 }
 
 Write-Host "`nNext Steps:" -ForegroundColor Yellow
